@@ -6,7 +6,7 @@ Run on a Windows machine (PyInstaller does not cross-compile):
     pip install -r requirements.txt pyinstaller
     pyinstaller app.spec
 
-Output: dist/VideoCues/VideoCues.exe  (one-dir build)
+Output: dist/VideoCues.exe  (one-file build)
 
 We explicitly collect PySide6's QtMultimedia data/plugins/binaries so the
 FFmpeg media backend ships with the app; without it, video playback fails on
@@ -47,22 +47,16 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="VideoCues",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,              # avoid UPX corrupting Qt/FFmpeg DLLs in the one-file exe
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,          # GUI app: no console window
     icon="assets/app.ico",  # bundled Video Cues app icon
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="VideoCues",
 )
