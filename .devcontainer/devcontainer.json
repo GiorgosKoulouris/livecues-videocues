@@ -1,0 +1,13 @@
+{
+    "name": "MidiVideoTrigger Development",
+
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "dev",
+    "workspaceFolder": "/workspace",
+    "shutdownAction": "stopCompose",
+    "remoteUser": "vscode",
+    "updateRemoteUserUID": true
+    // "postCreateCommand": "bash .devcontainer/post-create.sh"
+    // "forwardPorts": [3000, 5000],
+    // "postStartCommand": "bash .devcontainer/post-start.sh"
+}

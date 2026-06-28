@@ -1,0 +1,7 @@
+# Runtime dependencies
+PySide6>=6.5            # GUI + Qt Multimedia (FFmpeg backend) for video playback
+mido>=1.3              # MIDI message handling
+python-rtmidi>=1.5     # mido backend that talks to real/virtual MIDI ports
+
+# Build-only (install on the Windows build machine):
+#   pip install pyinstaller>=6.0

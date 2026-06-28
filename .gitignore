@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+winvenv/
+
+# PyInstaller build artifacts
+build/
+dist/
+src/build/
+src/dist/
+*.spec.bak
+
+# Scratch / throwaway
+/scratchpad/
+
+# Reaper test project (local fixture, not published)
+ReaperProj/
+
+# Actual videos
+src/assets/*.mp4
+
+# OS noise
+.DS_Store
+Thumbs.db
