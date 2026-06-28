@@ -77,8 +77,8 @@ into it first.
    folder, and run:
 
    ```bat
-   git clone <repo-url> video-cues
-   cd video-cues\src
+   git clone https://github.com/GiorgosKoulouris/VideoCues.git
+   cd VideoCues\src
    python -m venv .venv
    .venv\Scripts\activate
    pip install -r requirements.txt

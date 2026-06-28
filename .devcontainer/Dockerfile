@@ -1,7 +1,5 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-ARG STRIPE_CLI_VERSION=1.43.2
-
 USER root
 
 RUN apt-get update && \
