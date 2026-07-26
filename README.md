@@ -15,12 +15,17 @@ configured MIDI note arrives.
   mapping accepts the note as either a **MIDI number** (0–127) or a **note name**
   (e.g. `C3`, `F#2`, `Bb4`) — the two fields stay in sync.
 - **Output window** — opens as a resizable, movable window on the display of your
-  choice (projector / second monitor); press **F** (or use the Fullscreen button)
-  to toggle fullscreen. The video **fills** the output by default (no black bars).
+  choice (projector / second monitor); press **Ctrl+F** (or use the Fullscreen
+  button) to toggle fullscreen. The video **fills** the output by default (no black bars).
   Use the **Output position, zoom & crop** controls in the Status view to move,
   zoom, and crop each edge of the video on the display (handy for projector
   alignment); the placement is saved. Plays a looping idle video when nothing is
   triggered; a note interrupts with its clip, plays once, then returns to idle.
+  The window's **size, position, display, and fullscreen state are remembered**
+  and restored on the next run — including when you drag it onto another
+  monitor, which updates the saved output display. If you close it, **Show
+  Output** brings it back where it was (an incoming MIDI cue reopens it too);
+  closing the **control** window quits the whole app, output included.
 - Configuration is stored in `%APPDATA%\Video Cues\config.json` and
   **survives app and system restarts**.
 
@@ -31,16 +36,26 @@ configured MIDI note arrives.
 | Mapped Note-On received | Plays the clip once, then returns to the idle loop |
 | New note while a clip is playing | Interrupts immediately and plays the new clip |
 | Nothing playing | Loops the configured idle video (or black if none set) |
+| **Return to Idle** pressed | Drops the current clip and resumes the idle loop at once |
+| Note arrives with the output window closed | Reopens the output where it was, then plays the clip |
 | Audio | Muted by default; toggle in Edit view |
 | Note-Off | Ignored (only Note-On triggers) |
 
+The **Return to Idle** button turns **red whenever the idle loop is on the
+output** — i.e. whenever no cue is playing — so a glance at the control window
+tells you nothing is currently on the projector. A MIDI note always takes over
+from the idle loop; there is no mode to exit first.
+
 ## Hotkeys
+
+Modifier-based so a stray keypress during a show can't change what the audience
+sees:
 
 | Key | Action |
 |-----|--------|
-| **B** | Blackout toggle |
-| **F** | Toggle fullscreen of the output window |
-| **T** | Test-trigger the first mapping (no MIDI needed) |
+| **Ctrl+B** | Return to Idle (stop the current clip, resume the idle loop) |
+| **Ctrl+F** | Toggle fullscreen of the output window |
+| **Ctrl+T** | Test-trigger the first mapping (no MIDI needed) |
 | **Esc** | Exit fullscreen |
 
 ## RTP-MIDI setup (Windows)
@@ -183,8 +198,8 @@ sudo apt-get install -y libasound2-dev pkg-config \
 A repo dev container is provided in [`.devcontainer/`](.devcontainer): it is
 headless (`QT_QPA_PLATFORM=offscreen`), so the GUI is not visible, but the app
 runs and **video clips really decode and play**, which makes the idle / trigger /
-blackout logic testable. **MIDI input cannot be tested there** — a container has
-no ALSA sequencer, so no ports are listed; use the **T** hotkey to test-trigger a
+return-to-idle logic testable. **MIDI input cannot be tested there** — a container has
+no ALSA sequencer, so no ports are listed; use the **Ctrl+T** hotkey to test-trigger a
 mapping instead. Real MIDI input and the `.exe` build are Windows-only.
 
 ## Build the executable (on Windows)
@@ -216,6 +231,11 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
   "midi_channel": 0,
   "output_screen": 1,
   "audio_muted": true,
+  "window_x": 1920,
+  "window_y": 0,
+  "window_width": 1280,
+  "window_height": 720,
+  "output_fullscreen": false,
   "video_zoom": 1.0,
   "video_offset_x": 0.0,
   "video_offset_y": 0.0,
@@ -232,7 +252,18 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
 - `midi_channel`: `0` = all channels, `1`–`16` = a specific channel.
 - `mappings`: MIDI note number → video path **relative to `video_root`**
   (absolute paths are also accepted).
-- `output_screen`: index of the display to use for the output window.
+- `output_screen`: index of the display used for the output window. Updated
+  automatically when you drag the window onto another display, and settable from
+  the Edit view.
+- `window_x` / `window_y` / `window_width` / `window_height`: the output
+  window's **windowed** rectangle, saved shortly after you stop moving or
+  resizing it, and kept unchanged while fullscreen so leaving fullscreen returns
+  to your aligned window. Width/height `0` means "never saved" — the window then
+  opens centered at 60% of the display. If the saved rectangle no longer lands on
+  a connected display (projector unplugged, resolution change), it is discarded
+  and the window opens centered instead.
+- `output_fullscreen`: whether the output was fullscreen when last used; it
+  reopens that way on the saved display.
 - `video_zoom` / `video_offset_x` / `video_offset_y` / `video_crop_*`: output
   video placement set via the **Output position, zoom & crop** controls. The
   video fills the output by default (`1.0` zoom, all crops `0.0`); `video_zoom`
@@ -261,7 +292,8 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
     │   ├── config.py          load/save JSON config (dataclass)
     │   ├── paths.py           %APPDATA% + bundled-asset resolution
     │   ├── midi_engine.py     MIDI input -> Qt signals
-    │   ├── video_window.py    output window (fill, zoom/pan/crop, idle/trigger/blackout)
+    │   ├── video_window.py    output window (fill, zoom/pan/crop, idle/trigger,
+    │   │                      remembered size/position/display/fullscreen)
     │   ├── control_window.py  Status + Edit GUI
     │   └── mapping_editor.py  note -> video table
     ├── assets/                app icon (app.svg/png/ico) + a place to drop an

@@ -25,6 +25,15 @@ class Config:
     midi_channel: int = ALL_CHANNELS   # 0 = all, 1..16
     output_screen: int = 0             # index into QGuiApplication.screens()
     audio_muted: bool = True
+    # Output window placement, remembered across restarts. Width/height 0 means
+    # "never saved" -> the window opens centered at a default size. The windowed
+    # rect is kept even while fullscreen, so leaving fullscreen restores the
+    # aligned window instead of re-centering it.
+    window_x: int = 0
+    window_y: int = 0
+    window_width: int = 0
+    window_height: int = 0
+    output_fullscreen: bool = False
     # Output video placement (lets you align onto a projector). The video fills
     # the window by default (no black bars); these refine that placement:
     video_zoom: float = 1.0            # 1.0 = fill window; >1 zooms in further
@@ -71,6 +80,11 @@ class Config:
             midi_channel=_coerce_channel(data.get("midi_channel", base.midi_channel)),
             output_screen=_coerce_int(data.get("output_screen", base.output_screen), 0),
             audio_muted=bool(data.get("audio_muted", base.audio_muted)),
+            window_x=_coerce_int(data.get("window_x", base.window_x), base.window_x),
+            window_y=_coerce_int(data.get("window_y", base.window_y), base.window_y),
+            window_width=_coerce_int(data.get("window_width", base.window_width), base.window_width),
+            window_height=_coerce_int(data.get("window_height", base.window_height), base.window_height),
+            output_fullscreen=bool(data.get("output_fullscreen", base.output_fullscreen)),
             video_zoom=_coerce_float(data.get("video_zoom", base.video_zoom), base.video_zoom),
             video_offset_x=_coerce_float(data.get("video_offset_x", base.video_offset_x), base.video_offset_x),
             video_offset_y=_coerce_float(data.get("video_offset_y", base.video_offset_y), base.video_offset_y),
@@ -131,6 +145,26 @@ class Config:
             "crop_top": self.video_crop_top,
             "crop_bottom": self.video_crop_bottom,
         }
+
+    def window_state(self) -> dict:
+        """Output-window placement (target display, windowed rect, fullscreen)."""
+        return {
+            "screen": self.output_screen,
+            "x": self.window_x,
+            "y": self.window_y,
+            "width": self.window_width,
+            "height": self.window_height,
+            "fullscreen": self.output_fullscreen,
+        }
+
+    def apply_window_state(self, state: dict) -> None:
+        """Store a placement reported by the output window."""
+        self.output_screen = _coerce_int(state.get("screen", self.output_screen), self.output_screen)
+        self.window_x = _coerce_int(state.get("x", self.window_x), self.window_x)
+        self.window_y = _coerce_int(state.get("y", self.window_y), self.window_y)
+        self.window_width = _coerce_int(state.get("width", self.window_width), self.window_width)
+        self.window_height = _coerce_int(state.get("height", self.window_height), self.window_height)
+        self.output_fullscreen = bool(state.get("fullscreen", self.output_fullscreen))
 
     def idle_path(self) -> Optional[Path]:
         return self.resolve(self.idle_video) if self.idle_video else None

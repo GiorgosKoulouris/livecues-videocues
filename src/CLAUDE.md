@@ -59,23 +59,23 @@ and headlessly smoke-test code here, but:
   installs `libxrandr2`, which PySide6's `libffmpegmediaplugin.so` links
   against — without it Qt Multimedia reports *"No QtMultimedia backends found"*
   and `QMediaPlayer`/`QVideoSink` never construct. Clips decode and `EndOfMedia`
-  fires, so idle/trigger/blackout logic is fully testable here; you just can't
+  fires, so the idle / trigger / return-to-idle logic is fully testable here; you just can't
   see or hear the output.
 - **MIDI input cannot be tested here** — there is no ALSA sequencer
   (`/dev/snd/seq`), so `mido.get_input_names()` raises and
   `MidiEngine.available_devices()` returns `[]` (it swallows the error by
-  design). Exercise triggering via the **T** hotkey / `App._play_note(note)`
+  design). Exercise triggering via the **Ctrl+T** hotkey / `App._play_note(note)`
   instead. Real MIDI is a Windows-target concern.
 
 ## Layout
 
 ```
 app/
-  main.py            entry + signal wiring + hotkeys (B/F/T/Esc)  -> App class
+  main.py            entry + signal wiring + hotkeys (Ctrl+B/F/T, Esc)  -> App class
   config.py          Config dataclass; JSON load/save in %APPDATA% (atomic, forgiving)
   paths.py           %APPDATA% + bundled-asset resolution (PyInstaller _MEIPASS aware)
   midi_engine.py     MidiEngine(QObject): MIDI port -> Qt signals; note_name()/parse_note_name() helpers
-  video_window.py    VideoWindow: windowed-by-default output (F toggles fullscreen, resizable); fill-by-default video with manual zoom/pan/per-side crop; idle loop / trigger / blackout
+  video_window.py    VideoWindow: output window (Ctrl+F toggles fullscreen, resizable); fill-by-default video with manual zoom/pan/per-side crop; idle loop / trigger / return-to-idle; remembers its own placement
   control_window.py  ControlWindow: Status view + Edit view (QStackedWidget)
   mapping_editor.py  MappingEditor: note -> video table widget (note # spinbox + synced note-name field)
 run.py               entry script (also the PyInstaller entry point)
@@ -112,8 +112,38 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
 - **Video**: Qt Multimedia (`QMediaPlayer`/`QVideoWidget`). Idle video loops
   (`Loops.Infinite`); a trigger plays once (`Loops.Once`) and returns to idle on
   `EndOfMedia`. No idle video set → black screen. Audio muted by default.
-- **Output placement**: the output window opens **windowed by default** (F /
-  Fullscreen button toggles). The video **fills** the output by default — the
+  `VideoWindow.return_to_idle()` is a no-op while the idle loop is already
+  playing, so a double press doesn't restart it from the top.
+- **Output state feedback**: `VideoWindow.idle_state_changed(bool)` →
+  `ControlWindow.set_output_idle` colours the Return to Idle button red. It
+  tracks the *actual* output (emitted from `play_idle`/`trigger`), so a trigger
+  that fails on a missing file correctly leaves the button red.
+- **Window placement** persists as `output_screen` + `window_{x,y,width,height}`
+  + `output_fullscreen`. `VideoWindow` owns the live state and reports it via
+  `window_state_changed` → `App._on_window_state_changed` → config. Three things
+  to preserve when touching this: saves are **debounced** (`_save_timer`,
+  `_GEOMETRY_SAVE_DELAY_MS`) because dragging emits a burst of events and each
+  save rewrites the JSON; `_restoring` suppresses tracking while *we* position
+  the window, and `_remember_placement` additionally refuses to capture a rect
+  while `_fullscreen` is set — Qt reports the fullscreen geometry through
+  move/resize events *before* `isFullScreen()` flips, which would otherwise
+  overwrite the windowed rect; and `apply_window_state` drops a saved rect that
+  no longer overlaps a connected screen (`_rect_is_reachable`) so an unplugged
+  projector can't strand the window off-screen.
+- **Window lifecycle**: the control window *is* the app — `ControlWindow.closeEvent`
+  emits `closing` → `App._on_control_closed` closes the output window, disconnects
+  MIDI, and quits. (Qt only auto-quits when the *last* window closes, so without
+  this the app keeps running headless behind a closed control window.) Closing the
+  **output** window alone is recoverable instead: it stops playback, reports idle,
+  and `VideoWindow.show_output()` (Status-page **Show Output** button) reopens it
+  at its saved placement and restarts the idle loop. `trigger()` reopens a closed
+  output on its own so a cue can never land on a window that isn't there.
+- **Editing config must not drop unlisted fields**: `ControlWindow._save`
+  starts from `self._config.copy()` and overwrites only the form's own fields.
+  Rebuilding a fresh `Config(...)` there would silently reset the view transform
+  and window placement, which the Edit view doesn't show.
+- **Output placement**: the output window opens at its remembered size/position
+  (Ctrl+F / Fullscreen button toggles fullscreen). The video **fills** the output by default — the
   `QVideoWidget` uses `KeepAspectRatioByExpanding` (cover, no black bars) and is
   positioned manually (`VideoWindow._apply_geometry`) so it can be zoomed,
   panned, and **per-side cropped**, clipped to the window. A crop extends the
@@ -135,8 +165,15 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
 ## Locked product behavior (don't change without asking)
 
 Play once → idle · new note interrupts · looping idle video · audio muted by
-default · Note-Off ignored (Note-On only) · hotkeys B/F/T/Esc · on-screen MIDI
-activity log.
+default · Note-Off ignored (Note-On only) · hotkeys Ctrl+B / Ctrl+F / Ctrl+T +
+bare Esc · Return to Idle button red whenever the idle loop owns the output ·
+on-screen MIDI activity log.
+
+There is no blackout *mode*: **Return to Idle** (button / Ctrl+B) is a plain
+action that drops the current clip and resumes the idle loop, and a MIDI note
+always takes over from idle without anything to exit first. True black happens
+only when no idle video is configured. Don't reintroduce a latched blackout
+state unless asked.
 
 ## Working here
 

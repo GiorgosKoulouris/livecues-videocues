@@ -37,10 +37,15 @@ class App:
 
         self.video.now_playing_changed.connect(self.control.set_now_playing)
 
+        self.video.idle_state_changed.connect(self.control.set_output_idle)
+        self.video.window_state_changed.connect(self._on_window_state_changed)
+
         self.control.config_changed.connect(self._apply_config)
         self.control.test_note_requested.connect(self._play_note)
-        self.control.blackout_requested.connect(lambda: self.video.blackout())
+        self.control.return_to_idle_requested.connect(self.video.return_to_idle)
+        self.control.show_output_requested.connect(self.video.show_output)
         self.control.fullscreen_requested.connect(self.video.toggle_fullscreen)
+        self.control.closing.connect(self._on_control_closed)
 
         self.control.zoom_in_requested.connect(self.video.zoom_in)
         self.control.zoom_out_requested.connect(self.video.zoom_out)
@@ -54,10 +59,12 @@ class App:
     def _install_hotkeys(self) -> None:
         # Application-wide so they fire whether the control or output window
         # has focus.
+        # Modifier-based so a stray keypress during a show can't change the
+        # output; Esc stays bare because leaving fullscreen must be reflexive.
         for key, slot in (
-            ("B", lambda: self.video.blackout()),
-            ("F", self.video.toggle_fullscreen),
-            ("T", self.control._test_first_mapping),
+            ("Ctrl+B", self.video.return_to_idle),
+            ("Ctrl+F", self.video.toggle_fullscreen),
+            ("Ctrl+T", self.control._test_first_mapping),
             ("Esc", self._exit_fullscreen),
         ):
             sc = QShortcut(QKeySequence(key), self.control)
@@ -80,6 +87,8 @@ class App:
         config.save()
         self.control.set_config(config)
         self.video.configure(config.idle_path(), config.audio_muted)
+        # Only acts when the chosen display actually changed, so saving the Edit
+        # form doesn't yank the output window back to a centered position.
         self.video.show_on_screen(config.output_screen)
         self.video.set_move_step(config.move_step)
         self.video.set_zoom_step(config.zoom_step)
@@ -95,6 +104,12 @@ class App:
         self.config.video_crop_right = view["crop_right"]
         self.config.video_crop_top = view["crop_top"]
         self.config.video_crop_bottom = view["crop_bottom"]
+        self.config.save()
+        self.control.set_config(self.config)
+
+    def _on_window_state_changed(self, state: dict) -> None:
+        """Persist where the operator left the output window (debounced upstream)."""
+        self.config.apply_window_state(state)
         self.config.save()
         self.control.set_config(self.config)
 
@@ -118,11 +133,17 @@ class App:
     def start(self) -> None:
         self.control.show()
         self.video.configure(self.config.idle_path(), self.config.audio_muted)
-        self.video.show_on_screen(self.config.output_screen)
+        self.video.apply_window_state(self.config.window_state())
         self.video.set_move_step(self.config.move_step)
         self.video.set_zoom_step(self.config.zoom_step)
         self.video.apply_view(self.config.view_dict())
         self.engine.connect_device(self.config.midi_device, self.config.midi_channel)
+
+    def _on_control_closed(self) -> None:
+        """The control window is the app: closing it takes the output down too."""
+        self.video.close()
+        self.shutdown()
+        self.qapp.quit()
 
     def shutdown(self) -> None:
         self.engine.disconnect_device()

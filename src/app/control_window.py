@@ -45,8 +45,10 @@ class ControlWindow(QMainWindow):
 
     config_changed = Signal(object)       # Config
     test_note_requested = Signal(int)     # play this note's mapped clip
-    blackout_requested = Signal()
+    return_to_idle_requested = Signal()   # stop the current clip, resume the idle loop
+    show_output_requested = Signal()      # (re)open / raise the output window
     fullscreen_requested = Signal()
+    closing = Signal()                    # control window closed -> quit the app
     zoom_in_requested = Signal()
     zoom_out_requested = Signal()
     pan_requested = Signal(float, float)  # (dx, dy) in steps: -left/+right, -up/+down
@@ -102,15 +104,20 @@ class ControlWindow(QMainWindow):
         buttons = QHBoxLayout()
         edit_btn = QPushButton("Edit Configuration", page)
         edit_btn.clicked.connect(self.enter_edit_mode)
-        test_btn = QPushButton("Test Trigger", page)
+        test_btn = QPushButton("Test Trigger (Ctrl+T)", page)
         test_btn.clicked.connect(self._test_first_mapping)
-        black_btn = QPushButton("Blackout (B)", page)
-        black_btn.clicked.connect(self.blackout_requested)
-        full_btn = QPushButton("Fullscreen (F)", page)
+        # Kept on self so its colour can track the output state (red = idle).
+        self._idle_btn = QPushButton("Return to Idle (Ctrl+B)", page)
+        self._idle_btn.clicked.connect(self.return_to_idle_requested)
+        show_btn = QPushButton("Show Output", page)
+        show_btn.setToolTip("Reopen the output window if it was closed, or bring it to the front")
+        show_btn.clicked.connect(self.show_output_requested)
+        full_btn = QPushButton("Fullscreen (Ctrl+F)", page)
         full_btn.clicked.connect(self.fullscreen_requested)
         buttons.addWidget(edit_btn)
         buttons.addWidget(test_btn)
-        buttons.addWidget(black_btn)
+        buttons.addWidget(self._idle_btn)
+        buttons.addWidget(show_btn)
         buttons.addWidget(full_btn)
         buttons.addStretch(1)
         layout.addLayout(buttons)
@@ -362,6 +369,16 @@ class ControlWindow(QMainWindow):
     def set_now_playing(self, text: str) -> None:
         self._lbl_playing.setText(text)
 
+    def set_output_idle(self, idle: bool) -> None:
+        """Colour the Return to Idle button red while no clip is on the output.
+
+        Follows the real output state, so a trigger that fails (missing file)
+        correctly leaves the button red.
+        """
+        self._idle_btn.setStyleSheet(
+            "background-color: #c62828; color: white; font-weight: 600;" if idle else ""
+        )
+
     def refresh_status_labels(self) -> None:
         self._lbl_device.setText(self._config.midi_device or "—")
         ch = self._config.midi_channel
@@ -377,24 +394,17 @@ class ControlWindow(QMainWindow):
         self._stack.setCurrentWidget(self._status_page)
 
     def _save(self) -> None:
-        new_config = Config(
-            video_root=self._edit_video_root.text().strip(),
-            idle_video=self._edit_idle.text().strip(),
-            midi_device=self._edit_device.currentText().strip(),
-            midi_channel=self._edit_channel.currentData(),
-            output_screen=self._edit_screen.currentData() or 0,
-            audio_muted=self._edit_muted.isChecked(),
-            video_zoom=self._config.video_zoom,
-            video_offset_x=self._config.video_offset_x,
-            video_offset_y=self._config.video_offset_y,
-            video_crop_left=self._config.video_crop_left,
-            video_crop_right=self._config.video_crop_right,
-            video_crop_top=self._config.video_crop_top,
-            video_crop_bottom=self._config.video_crop_bottom,
-            move_step=self._config.move_step,
-            zoom_step=self._config.zoom_step,
-            mappings=self._mapping_editor.to_mappings(),
-        )
+        # Start from the live config and overwrite only what this form owns, so
+        # settings the Edit view doesn't show (view transform, window placement)
+        # survive a save.
+        new_config = self._config.copy()
+        new_config.video_root = self._edit_video_root.text().strip()
+        new_config.idle_video = self._edit_idle.text().strip()
+        new_config.midi_device = self._edit_device.currentText().strip()
+        new_config.midi_channel = self._edit_channel.currentData()
+        new_config.output_screen = self._edit_screen.currentData() or 0
+        new_config.audio_muted = self._edit_muted.isChecked()
+        new_config.mappings = self._mapping_editor.to_mappings()
         self._config = new_config
         self.refresh_status_labels()
         self._stack.setCurrentWidget(self._status_page)
@@ -460,6 +470,11 @@ class ControlWindow(QMainWindow):
         self._edit_idle.setText(selected)
 
     # ================= Misc ============================================
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        """Closing the control window shuts the whole app down, output included."""
+        self.closing.emit()
+        super().closeEvent(event)
+
     def _test_first_mapping(self) -> None:
         if not self._config.mappings:
             self.append_activity("Test Trigger: no mappings configured")
