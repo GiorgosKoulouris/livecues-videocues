@@ -8,13 +8,9 @@ services:
 
     volumes:
       - ..:/workspace
-      - venv:/workspace/.venv
-      - cache:/home/vscode/.cache/pip
       - claude:/home/vscode/.claude
 
     tty: true
 
 volumes:
-  venv:
-  cache:
   claude:

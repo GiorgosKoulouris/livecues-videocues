@@ -2,6 +2,31 @@
 
 Guidance for working in this repository. The project lives in `/workspace/src/`.
 
+## Git rules (not negotiable)
+
+**All work happens on the `dev` branch.** Before committing anything, confirm
+with `git branch --show-current`; if it is not `dev`, switch to it (or branch off
+it) first.
+
+These are the **owner's** jobs, never the agent's:
+
+- **Never commit directly to `main`.**
+- **Never merge into `main`** (no `git merge`, no rebase onto it, no fast-forward,
+  no PR merge).
+- **Never push** — not `main`, not `dev`, not any branch, not tags. No
+  `git push` at all, even when a commit went fine and pushing looks like the
+  obvious next step.
+
+Committing to `dev` is fine when asked. If a task seems to *require* touching
+`main` or publishing anything, stop and hand it back to the owner instead.
+
+**Commit messages carry no AI attribution.** Do not add `Co-Authored-By: Claude`
+(or any other co-author trailer), do not add "Generated with…" footers, and do
+not mention Claude, Anthropic, or any assistant in the subject, body, or
+trailers. Write the message as the repository owner would: describe the change
+itself and nothing about who or what produced it. The same applies to anything
+else that ends up published — tags, PR descriptions, release notes.
+
 ## What this is
 
 **Video Cues** — a Windows desktop app that listens to MIDI (including
@@ -14,24 +39,33 @@ a standalone `.exe` with PyInstaller.
 This devcontainer is **Linux**, but the app targets **Windows**. You can author
 and headlessly smoke-test code here, but:
 
-- **The `.exe` build and real RTP-MIDI + video playback must be verified on
-  Windows** — PyInstaller does not cross-compile.
+- **The `.exe` build, real RTP-MIDI input, and anything you have to *see* (the
+  projector output, fullscreen, display placement) must be verified on
+  Windows** — PyInstaller does not cross-compile and this container is headless.
 - **Windows Python version matters:** `python-rtmidi` only ships prebuilt
   Windows wheels for **Python 3.10–3.12** (1.5.8 is the latest release, no
   3.13/3.14 wheels). Two supported paths, both documented in README
   *Troubleshooting*:
-  - **Python 3.12 (simplest):** `py -3.12 -m venv .venv` → installs from wheels,
-    no compiler.
+  - **Python 3.12 (simplest):** `py -3.12 -m venv winvenv` → installs from
+    wheels, no compiler.
   - **Python 3.14 (build from source):** install *Build Tools for Visual Studio*
     with the **"Desktop development with C++"** workload (MSVC + Windows SDK),
-    then `py -3.14 -m venv .venv` and `pip install -r requirements.txt` —
+    then `py -3.14 -m venv winvenv` and `pip install -r src\requirements.txt` —
     `python-rtmidi` compiles against MSVC; `PySide6` (abi3) and `mido` install
-    normally. Use this when the user wants/needs 3.14.
-- In this container, `python-rtmidi` may not be installed (needs ALSA headers),
-  and **Qt Multimedia has no media backend** — expect
-  `qt.multimedia.symbolsresolver: Couldn't load pipewire` / `No QtMultimedia
-  backends found` warnings. These are environmental and **do not** indicate a
-  bug; on Windows PySide6 ships the FFmpeg backend (bundled via `app.spec`).
+    normally. Use this when the user wants/needs 3.14. The owner's checkout is on
+    3.14, so `winvenv` is the environment that actually exists on the Windows
+    side; it's created at the **repo root**, not inside `src/`.
+- **Video playback works in this container** (offscreen): the devcontainer
+  installs `libxrandr2`, which PySide6's `libffmpegmediaplugin.so` links
+  against — without it Qt Multimedia reports *"No QtMultimedia backends found"*
+  and `QMediaPlayer`/`QVideoSink` never construct. Clips decode and `EndOfMedia`
+  fires, so idle/trigger/blackout logic is fully testable here; you just can't
+  see or hear the output.
+- **MIDI input cannot be tested here** — there is no ALSA sequencer
+  (`/dev/snd/seq`), so `mido.get_input_names()` raises and
+  `MidiEngine.available_devices()` returns `[]` (it swallows the error by
+  design). Exercise triggering via the **T** hotkey / `App._play_note(note)`
+  instead. Real MIDI is a Windows-target concern.
 
 ## Layout
 
@@ -47,7 +81,9 @@ app/
 run.py               entry script (also the PyInstaller entry point)
 app.spec             PyInstaller build spec (run on Windows)
 requirements.txt     PySide6, mido, python-rtmidi
-assets/              bundled idle/placeholder videos + app icon (app.svg/png/ico)
+assets/              app icon (app.svg/png/ico) + optional idle video; `*.mp4` here is
+                     gitignored, so any clips are local fixtures (app.spec still bundles
+                     whatever is in the folder at build time)
 ```
 
 The app icon is `assets/app.svg` (source); `app.png` (runtime window icon, set via
@@ -104,21 +140,44 @@ activity log.
 
 ## Working here
 
-- **Use the project venv at `/workspace/.venv`** — it already has `PySide6` and
-  `mido` installed, so just call `/workspace/.venv/bin/python` (no need to create
-  a venv or pip-install for routine work). `python-rtmidi` is intentionally NOT
-  installed here (it can't build on Linux without ALSA headers and isn't needed
-  for offscreen GUI work — `mido` is imported lazily). If the mounted `.venv` is
-  ever empty or root-owned after a container reset, rebuild it:
-  `sudo chown -R vscode:vscode /workspace/.venv && python3 -m venv /workspace/.venv && /workspace/.venv/bin/pip install PySide6 mido`.
-- Run from source: `/workspace/.venv/bin/python run.py` (or `... -m app.main`).
-- Headless smoke test in this container: set `QT_QPA_PLATFORM=offscreen`, then
-  instantiate `App` and exercise config roundtrip + signal wiring. PySide6 needs
-  these system libs (already installed here, reinstall if the container resets):
-  `libglib2.0-0 libgl1 libegl1 libdbus-1-3 libxkbcommon0 fontconfig libpulse0`.
-  Expect harmless QtMultimedia "no backend" warnings — filter them out.
+- **Use the project venv at `/workspace/src/.venv`** (Python 3.14) — it has
+  `PySide6`, `mido` *and* `python-rtmidi` installed, so just call
+  `/workspace/src/.venv/bin/python`; no need to create a venv or pip-install for
+  routine work. `python-rtmidi` has no 3.14 wheel, so it was compiled from source
+  here — that works because the image ships `libasound2-dev` + `pkg-config`. To
+  rebuild the venv from scratch:
+  `cd /workspace/src && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+- **Ignore `/workspace/winvenv`** — that is the *Windows* venv from the host
+  checkout (`Scripts\python.exe`, CPython 3.14.6, and PyInstaller for building
+  the `.exe`). It is visible over the bind mount but unusable on Linux; the only
+  venv to run here is `/workspace/src/.venv`. Never create a venv at the repo
+  root — root is Windows territory, `src/.venv` is ours.
+- Run from source: `/workspace/src/.venv/bin/python run.py` (or `... -m app.main`).
+- `QT_QPA_PLATFORM=offscreen` and `QT_LOGGING_RULES` are already set in the image,
+  so the app runs headless out of the box. Two harmless messages remain and are
+  **not** bugs: `PulseAudioService: pa_context_connect() failed` (no audio server
+  in the container; audio is muted by default and playback is unaffected) and
+  `This plugin does not support propagateSizeHints()/raise()` (inherent to the
+  offscreen platform plugin).
+- Headless smoke test: instantiate `App(qapp)` and exercise config roundtrip,
+  signal wiring, and a real trigger. Point the config somewhere disposable with
+  `XDG_CONFIG_HOME=$(mktemp -d)` — on Linux `paths.config_file()` resolves to
+  `$XDG_CONFIG_HOME/Video Cues/config.json` (the Windows `%APPDATA%` equivalent),
+  so tests don't clobber a real config. Give the transform/playback a moment:
+  drive assertions from `QTimer.singleShot` inside `qapp.exec()`, not inline.
+- The image installs only what PySide6 loads offscreen (`libglib2.0-0 libgl1
+  libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libfreetype6 libx11-6
+  libx11-xcb1 libxcb1 libxext6 libxrender1 libxrandr2 libpulse0`). The Qt **xcb**
+  platform plugin is deliberately *not* satisfied — if you ever want a visible GUI
+  over X11/VNC, add back `libxcb-cursor0 libxcb-icccm4 libxcb-image0
+  libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-render0 libxcb-shape0
+  libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1
+  libxkbcommon-x11-0` and unset `QT_QPA_PLATFORM`.
 - Build (Windows only): `pip install -r requirements.txt pyinstaller` then
-  `pyinstaller app.spec` → `dist\VideoCues\VideoCues.exe`.
+  `pyinstaller app.spec` → `dist\VideoCues.exe` (**one-file** build; that single
+  `.exe` is the distributable). Keep `upx=False` — UPX corrupts the bundled
+  Qt/FFmpeg DLLs — and keep the `hiddenimports` for `rtmidi` /
+  `mido.backends.rtmidi`, which mido loads dynamically.
 
 ## Conventions
 
