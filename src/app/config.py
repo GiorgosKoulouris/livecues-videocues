@@ -106,7 +106,11 @@ class Config:
     # ----- persistence --------------------------------------------------
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Config":
-        path = Path(path) if path else paths.config_file()
+        if path:
+            path = Path(path)
+        else:
+            paths.migrate_legacy_config()
+            path = paths.config_file()
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 return cls.from_dict(json.load(fh))

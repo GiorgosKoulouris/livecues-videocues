@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication
 
-from . import APP_NAME, __version__
+from . import APP_NAME
 from .config import Config
 from .paths import asset
 from .control_window import ControlWindow
@@ -152,7 +152,6 @@ class App:
 def main() -> int:
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(APP_NAME)
-    qapp.setApplicationDisplayName(f"Video Cues {__version__}")
     qapp.setWindowIcon(QIcon(str(asset("app.ico"))))
 
     app = App(qapp)

@@ -58,5 +58,5 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,          # GUI app: no console window
-    icon="assets/app.ico",  # bundled Video Cues app icon
+    icon="assets/app.ico",  # bundled LiveCues VideoCues app icon
 )

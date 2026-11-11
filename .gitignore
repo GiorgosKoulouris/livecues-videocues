@@ -27,3 +27,9 @@ src/assets/*.mp4
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Impeccable (design skill, agents, local config, hook settings)
+.claude/skills/impeccable/
+.claude/agents/impeccable-*.md
+.claude/settings.local.json
+.impeccable/

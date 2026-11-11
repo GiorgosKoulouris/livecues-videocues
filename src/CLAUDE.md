@@ -29,7 +29,8 @@ else that ends up published — tags, PR descriptions, release notes.
 
 ## What this is
 
-**Video Cues** — a Windows desktop app that listens to MIDI (including
+**LiveCues VideoCues** (short code **LCVC**) — part of the LiveCues toolkit,
+alongside `livecues-reaper-remote` (a separate repo; don't touch it from here). A Windows desktop app that listens to MIDI (including
 **RTP-MIDI** over the network) and plays a video clip on a projector / second
 display when a configured MIDI note arrives. Python + PySide6 (Qt). Packaged to
 a standalone `.exe` with PyInstaller.
@@ -97,8 +98,11 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
   `MidiEngine.note_on` → `App._on_note_on` → `App._play_note` →
   `VideoWindow.trigger`. Config edits flow `ControlWindow.config_changed` →
   `App._apply_config` (saves to disk + re-applies MIDI/output live).
-- **Config** persists to `%APPDATA%\Video Cues\config.json` and must
-  survive app/system restarts. Keep `Config.from_dict` forgiving (ignore unknown
+- **Config** persists to `%APPDATA%\LiveCues\VideoCues\config.json` and must
+  survive app/system restarts. The folder is fixed in `paths.CONFIG_SUBDIR`, not
+  derived from `APP_NAME`. `Config.load()` first calls
+  `paths.migrate_legacy_config()`, which copies a pre-1.1 `%APPDATA%\Video Cues\config.json`
+  across once if the new file is missing (the old folder stays as a backup). Keep `Config.from_dict` forgiving (ignore unknown
   keys, default missing ones, drop invalid notes) so old configs keep loading.
   Mapping values are paths **relative to `video_root`** (absolute also accepted).
 - **MIDI**: `midi_channel` `0` = all channels, `1..16` = specific (mido channels
@@ -199,7 +203,7 @@ state unless asked.
 - Headless smoke test: instantiate `App(qapp)` and exercise config roundtrip,
   signal wiring, and a real trigger. Point the config somewhere disposable with
   `XDG_CONFIG_HOME=$(mktemp -d)` — on Linux `paths.config_file()` resolves to
-  `$XDG_CONFIG_HOME/Video Cues/config.json` (the Windows `%APPDATA%` equivalent),
+  `$XDG_CONFIG_HOME/LiveCues/VideoCues/config.json` (the Windows `%APPDATA%` equivalent),
   so tests don't clobber a real config. Give the transform/playback a moment:
   drive assertions from `QTimer.singleShot` inside `qapp.exec()`, not inline.
 - The image installs only what PySide6 loads offscreen (`libglib2.0-0 libgl1
@@ -211,7 +215,7 @@ state unless asked.
   libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1
   libxkbcommon-x11-0` and unset `QT_QPA_PLATFORM`.
 - Build (Windows only): `pip install -r requirements.txt pyinstaller` then
-  `pyinstaller app.spec` → `dist\VideoCues.exe` (**one-file** build; that single
+  `pyinstaller app.spec` → `dist\VideoCues.exe` (the exe name was deliberately kept through the LiveCues rename; **one-file** build; that single
   `.exe` is the distributable). Keep `upx=False` — UPX corrupts the bundled
   Qt/FFmpeg DLLs — and keep the `hiddenimports` for `rtmidi` /
   `mido.backends.rtmidi`, which mido loads dynamically.

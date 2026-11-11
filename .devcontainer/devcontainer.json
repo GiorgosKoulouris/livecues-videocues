@@ -1,13 +1,17 @@
 {
-    "name": "VideoCues Development",
+    "name": "LCVC Development",
     "dockerComposeFile": "docker-compose.yml",
     "service": "dev",
     "workspaceFolder": "/workspace",
     "shutdownAction": "stopCompose",
     "remoteUser": "vscode",
     "updateRemoteUserUID": true,
+    "postCreateCommand": "sudo chown vscode:vscode src/.venv && { [ -x src/.venv/bin/python ] || python3 -m venv src/.venv; } && src/.venv/bin/pip install -r src/requirements.txt",
     "features": {
-        "ghcr.io/devcontainers/features/github-cli:1": {}
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        "ghcr.io/devcontainers/features/node:1": {
+            "version": "lts"
+        }
     },
     "customizations": {
         "vscode": {

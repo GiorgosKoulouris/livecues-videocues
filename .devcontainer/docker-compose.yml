@@ -1,17 +1,22 @@
 services:
   dev:
-    container_name: videocues-devcontainer
+    container_name: lcvc-devcontainer
 
     build:
-      context: ..
-      dockerfile: .devcontainer/Dockerfile
+      # The Dockerfile copies nothing from the repo, so keep the context to this
+      # folder; `..` would ship the whole repo (build/, dist/, ...) over 9p.
+      context: .
+      dockerfile: Dockerfile
 
     volumes:
       - ..:/workspace
+      # The venv lives in a Docker volume, not on the slow 9p host mount.
+      - venv:/workspace/src/.venv
       - claude:/home/vscode/.claude
       - ${CLAUDE_SKILLS_DIR:-D:/Projects/Other/ClaudeSkills}:/home/vscode/.claude/skills
 
     tty: true
 
 volumes:
+  venv:
   claude:

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import APP_NAME, __version__
 from .config import ALL_CHANNELS, Config
 from .mapping_editor import MappingEditor
 from .midi_engine import MidiEngine, note_name
@@ -62,7 +63,7 @@ class ControlWindow(QMainWindow):
         self._config = config.copy()
         self._engine = engine
 
-        self.setWindowTitle("Video Cues")
+        self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.resize(720, 560)
 
         self._stack = QStackedWidget(self)

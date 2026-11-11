@@ -21,6 +21,8 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QLabel, QWidget
 
+from . import APP_NAME
+
 _INFINITE = QMediaPlayer.Loops.Infinite
 _ONCE = QMediaPlayer.Loops.Once
 
@@ -66,7 +68,7 @@ class VideoWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Video Cues — Output")
+        self.setWindowTitle(f"{APP_NAME} — Output")
         self.setStyleSheet("background-color: black;")
         self.resize(960, 540)
 

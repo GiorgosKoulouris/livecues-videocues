@@ -1,6 +1,9 @@
-<img src="src/assets/app.png" alt="Video Cues" width="96" align="left" />
+<img src="src/assets/app.png" alt="LiveCues VideoCues" width="96" align="left" />
 
-# Video Cues
+# LiveCues VideoCues
+
+Part of the LiveCues toolkit, alongside
+[LiveCues ReaperRemote](https://github.com/GiorgosKoulouris/livecues-reaper-remote).
 
 A Windows desktop app that listens to MIDI (including **RTP-MIDI** over the
 network) and plays a video clip on a projector / second display whenever a
@@ -26,7 +29,7 @@ configured MIDI note arrives.
   monitor, which updates the saved output display. If you close it, **Show
   Output** brings it back where it was (an incoming MIDI cue reopens it too);
   closing the **control** window quits the whole app, output included.
-- Configuration is stored in `%APPDATA%\Video Cues\config.json` and
+- Configuration is stored in `%APPDATA%\LiveCues\VideoCues\config.json` and
   **survives app and system restarts**.
 
 ## How triggering behaves
@@ -67,7 +70,7 @@ install the free **rtpMIDI** driver by Tobias Erichsen
 1. Install rtpMIDI and open it.
 2. Create a session (e.g. *"Session 1"`) and enable it.
 3. Connect your remote MIDI source to that session (directory / "Connect").
-4. In **Video Cues → Edit → MIDI device**, select the matching port
+4. In **LiveCues VideoCues → Edit → MIDI device**, select the matching port
    (e.g. `rtpMIDI Session 1` / `Network`), set the channel, and **Save**.
 
 > Alternative: a fully in-process AppleMIDI implementation (`pymidi`) is possible
@@ -101,8 +104,8 @@ Both are gitignored.
    root** create the venv and install:
 
    ```bat
-   git clone https://github.com/GiorgosKoulouris/VideoCues.git
-   cd VideoCues
+   git clone https://github.com/GiorgosKoulouris/livecues-videocues.git
+   cd livecues-videocues
    py -3.12 -m venv winvenv
    winvenv\Scripts\activate
    pip install -r src\requirements.txt
@@ -221,7 +224,11 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
 
 ## Configuration file
 
-`%APPDATA%\Video Cues\config.json`:
+`%APPDATA%\LiveCues\VideoCues\config.json`:
+
+> Upgrading from 1.0.x, which stored it in `%APPDATA%\Video Cues\`: on first
+> run the app copies that `config.json` across once. The old folder is left in
+> place as a backup and can be deleted afterwards.
 
 ```json
 {
