@@ -1,0 +1,74 @@
+name: Bug report
+description: Something does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go through
+        [private reporting](https://github.com/GiorgosKoulouris/livecues-videocues/security/advisories/new), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect to see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Map note C3 to clip.mp4 on channel 1
+        2. Send the note from Reaper over RTP-MIDI
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: The release you are running, or the commit if running from source.
+      placeholder: e.g. 1.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How are you running it?
+      options:
+        - Released .exe
+        - From source (Windows)
+        - From source (Linux / macOS)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Windows 11 24H2
+    validations:
+      required: true
+  - type: dropdown
+    id: midi
+    attributes:
+      label: MIDI source
+      options:
+        - USB / hardware MIDI
+        - RTP-MIDI (network)
+        - Virtual MIDI port (e.g. loopMIDI)
+        - Not MIDI related
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration (optional)
+      description: The relevant part of `%APPDATA%\LiveCues\VideoCues\config.json`. Remove any paths you do not want to share.
+      render: json
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output (optional)
+      description: Any error text, e.g. from the terminal when running from source.
+      render: text

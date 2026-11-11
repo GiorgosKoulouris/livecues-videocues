@@ -82,7 +82,9 @@ app/
   theme.py           Suite look: colour tokens, Plex fonts, palette + style sheet, drawn Key / Tab / StateChip / Tick
 run.py               entry script (also the PyInstaller entry point)
 app.spec             PyInstaller build spec (run on Windows)
-requirements.txt     PySide6, mido, python-rtmidi
+requirements.txt     PySide6, mido, python-rtmidi (loose minimums)
+requirements-lock.txt  exact pinned runtime versions (Dependabot bumps these)
+requirements-build.txt PyInstaller toolchain pins (Windows build only)
 assets/              app icon (app.svg/png/ico), fonts/ (IBM Plex TTFs + OFL), ui/ (spinbox/combo arrows), optional idle video; `*.mp4` here is
                      gitignored, so any clips are local fixtures (app.spec still bundles
                      whatever is in the folder at build time)
@@ -234,7 +236,7 @@ state unless asked.
   libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-render0 libxcb-shape0
   libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1
   libxkbcommon-x11-0` and unset `QT_QPA_PLATFORM`.
-- Build (Windows only): `pip install -r requirements.txt pyinstaller` then
+- Build (Windows only): `pip install -r requirements-lock.txt -r requirements-build.txt` then
   `pyinstaller app.spec` → `dist\VideoCues.exe` (the exe name was deliberately kept through the LiveCues rename; **one-file** build; that single
   `.exe` is the distributable). Keep `upx=False` — UPX corrupts the bundled
   Qt/FFmpeg DLLs — and keep the `hiddenimports` for `rtmidi` /

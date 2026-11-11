@@ -119,7 +119,7 @@ Both are gitignored.
    cd livecues-videocues
    py -3.12 -m venv winvenv
    winvenv\Scripts\activate
-   pip install -r src\requirements.txt
+   pip install -r src\requirements-lock.txt
    cd src
    python run.py
    ```
@@ -167,7 +167,7 @@ source**. This works once a C++ compiler is available:
    ```powershell
    py -3.14 -m venv winvenv
    .\winvenv\Scripts\Activate.ps1
-   python -m pip install -r src\requirements.txt
+   python -m pip install -r src\requirements-lock.txt
    ```
 
    `PySide6` (abi3 wheel) and `mido` install normally; `python-rtmidi` compiles
@@ -222,7 +222,7 @@ Use the `winvenv` from *Run from source*, then build from the `src` folder:
 
 ```bat
 winvenv\Scripts\activate
-pip install -r src\requirements.txt pyinstaller
+pip install -r src\requirements-lock.txt -r src\requirements-build.txt
 cd src
 pyinstaller app.spec
 ```
@@ -303,6 +303,8 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
 ├── LICENSE          MIT
 ├── .gitignore
 ├── .devcontainer/   VS Code dev container (Linux dev box)
+├── .github/         contributing, security policy, issue/PR templates,
+│                    Dependabot config, CI (CodeQL + pip-audit)
 ├── winvenv/         Windows venv — run + build here (gitignored)
 └── src/             the application
     ├── app/
@@ -321,6 +323,8 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
     ├── .venv/                 Linux venv used by the dev container (gitignored)
     ├── run.py                 entry script (also used by PyInstaller)
     ├── app.spec               PyInstaller build spec (run on Windows)
-    ├── requirements.txt
+    ├── requirements.txt       loose minimum versions
+    ├── requirements-lock.txt  exact tested/built versions
+    ├── requirements-build.txt PyInstaller toolchain (Windows build)
     └── CLAUDE.md              contributor / architecture notes
 ```

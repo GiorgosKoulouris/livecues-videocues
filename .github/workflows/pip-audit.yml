@@ -1,0 +1,48 @@
+name: Dependency audit
+
+on:
+  push:
+    branches: [dev, stage, main]
+    paths: ["src/requirements*.txt", ".github/workflows/pip-audit.yml"]
+  pull_request:
+    branches: [dev, stage, main]
+    paths: ["src/requirements*.txt", ".github/workflows/pip-audit.yml"]
+  # Weekly and manual runs audit every branch, catching newly published
+  # advisories for dependencies that have not reached main yet. GitHub runs
+  # these from the copy of this file on main.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    name: pip-audit (${{ matrix.ref || github.ref_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Push and pull request runs audit the commit that triggered them ("").
+        ref: ${{ fromJSON(contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) && '["dev","stage","main"]' || '[""]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit==2.10.1
+
+      # The files are fully pinned, so audit them as-is without resolving or
+      # installing (the build tools are Windows-only).
+      - name: Audit pinned dependencies
+        run: >
+          pip-audit --disable-pip --no-deps --progress-spinner off
+          -r src/requirements-lock.txt
+          -r src/requirements-build.txt

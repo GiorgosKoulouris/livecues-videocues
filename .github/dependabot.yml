@@ -1,0 +1,30 @@
+# Version updates open pull requests against dev, so they follow the
+# dev -> stage -> main flow. Security updates (a repository setting) always
+# open against main, whatever target-branch says: apply those bumps on dev
+# instead and close the pull request. See CONTRIBUTING.md, "Dependencies".
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /src
+    target-branch: dev
+    schedule:
+      interval: weekly
+    # Leave the loose minimums in requirements.txt alone unless a new version
+    # falls outside them; the exact pins in requirements-lock.txt get bumped.
+    versioning-strategy: increase-if-necessary
+    groups:
+      pyside6:
+        patterns: ["PySide6*", "shiboken6"]
+      pyinstaller:
+        patterns: ["pyinstaller*", "altgraph", "pefile", "pywin32-ctypes"]
+    labels: ["dependencies"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies"]
