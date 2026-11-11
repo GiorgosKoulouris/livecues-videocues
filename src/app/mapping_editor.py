@@ -6,23 +6,31 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
-    QPushButton,
     QSpinBox,
     QTableWidget,
+    QVBoxLayout,
     QWidget,
 )
 
+from . import theme
 from .midi_engine import note_name, parse_note_name
+from .theme import Key
 
 _COL_NOTE = 0
 _COL_NAME = 1
 _COL_PATH = 2
 _COL_ACTIONS = 3
+
+_ROW_H = theme.KEY_H + 10   # a 36px field with 5px above and below
+_PAD = 5
 
 
 class MappingEditor(QWidget):
@@ -37,43 +45,70 @@ class MappingEditor(QWidget):
     ) -> None:
         super().__init__(parent)
         self._get_video_root = get_video_root
+        self._fields: Dict[QSpinBox, tuple] = {}  # row's spinbox -> (spin, path edit)
 
         self.table = QTableWidget(0, 4, self)
         self.table.setHorizontalHeaderLabels(
-            ["Note #", "Note name", "Video file (relative to root)", ""]
+            ["Note", "Name", "Video file (relative to root)", ""]
         )
+        for col in range(self.table.columnCount()):
+            item = self.table.horizontalHeaderItem(col)
+            item.setFont(theme.legend_font(11))
+            item.setForeground(QColor(theme.LEGEND_DIM))
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(_COL_NOTE, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeToContents)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header.setHighlightSections(False)
+        header.setSectionResizeMode(_COL_NOTE, QHeaderView.Fixed)
+        header.setSectionResizeMode(_COL_NAME, QHeaderView.Fixed)
         header.setSectionResizeMode(_COL_PATH, QHeaderView.Stretch)
-        header.setSectionResizeMode(_COL_ACTIONS, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(_COL_ACTIONS, QHeaderView.Fixed)
+        header.resizeSection(_COL_NOTE, 92)
+        header.resizeSection(_COL_NAME, 80)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(_ROW_H)
+        self.table.setMinimumHeight(30 + 2 * _ROW_H)
+        self.table.setShowGrid(False)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setFocusPolicy(Qt.NoFocus)
+        self.table.setStyleSheet(
+            f"QTableWidget::item {{ border-bottom: 1px solid {theme.LINE}; }}"
+        )
 
-        add_btn = QPushButton("+ Add mapping", self)
-        add_btn.clicked.connect(lambda: self.add_row())
-
-        layout = QHBoxLayout()
-        layout.addWidget(add_btn)
-        layout.addStretch(1)
-
-        from PySide6.QtWidgets import QVBoxLayout
+        # Placed by the Edit page in its bottom row; owned by this editor.
+        self.add_key = Key("Add mapping", self, glyph="plus")
+        self.add_key.clicked.connect(lambda: self.add_row())
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self.table)
-        outer.addLayout(layout)
+
+        # Empty state: say what the table is for instead of showing a blank box.
+        self._empty = QLabel("No mappings yet. Add one to link a MIDI note to a video.", self.table.viewport())
+        self._empty.setAlignment(Qt.AlignCenter)
+        self._empty.setWordWrap(True)
+        self._empty.setStyleSheet(f"color: {theme.LEGEND_DIM}; background: transparent;")
+        veil = QVBoxLayout(self.table.viewport())
+        veil.setContentsMargins(16, 0, 16, 0)
+        veil.addWidget(self._empty)
+        model = self.table.model()
+        for sig in (model.rowsInserted, model.rowsRemoved, model.modelReset):
+            sig.connect(self._sync_empty)
+        self._sync_empty()
+
+    def _sync_empty(self, *_args) -> None:
+        self._empty.setVisible(self.table.rowCount() == 0)
 
     # ----- (de)serialisation -------------------------------------------
     def load(self, mappings: Dict[int, str]) -> None:
         self.table.setRowCount(0)
+        self._fields.clear()
         for note in sorted(mappings):
             self.add_row(note, mappings[note])
 
     def to_mappings(self) -> Dict[int, str]:
         result: Dict[int, str] = {}
         for row in range(self.table.rowCount()):
-            spin = self.table.cellWidget(row, _COL_NOTE)
-            path_edit = self.table.cellWidget(row, _COL_PATH)
+            spin, path_edit = self._row_fields(row)
             if spin is None or path_edit is None:
                 continue
             note = spin.value()
@@ -90,10 +125,13 @@ class MappingEditor(QWidget):
         spin = QSpinBox(self)
         spin.setRange(0, 127)
         spin.setValue(note)
+        spin.setFont(theme.mono_font(13))
+        spin.setAccessibleName("MIDI note number")
 
         name_edit = QLineEdit(note_name(note), self)
+        name_edit.setFont(theme.mono_font(13))
         name_edit.setAlignment(Qt.AlignCenter)
-        name_edit.setFixedWidth(72)
+        name_edit.setAccessibleName("Note name")
         name_edit.setToolTip("Note name, e.g. C3, F#2, Bb4 — stays in sync with the number")
 
         # Number -> name (always reflects the spin's value).
@@ -109,31 +147,47 @@ class MappingEditor(QWidget):
         name_edit.editingFinished.connect(_sync_name)
 
         path_edit = QLineEdit(path, self)
+        path_edit.setFont(theme.mono_font(13))
         path_edit.setPlaceholderText("path/to/clip.mp4")
+        path_edit.setAccessibleName("Video file")
 
-        browse = QPushButton("Browse…", self)
+        browse = Key("Browse…", self)
         browse.clicked.connect(lambda _=False, pe=path_edit: self._browse(pe))
-        test = QPushButton("Test", self)
+        test = Key("Test", self, glyph="play")
+        test.setToolTip("Play this clip on the output now")
         test.clicked.connect(lambda _=False, s=spin: self.test_requested.emit(s.value()))
-        remove = QPushButton("✕", self)
-        remove.setFixedWidth(28)
+        remove = Key("", self, glyph="cross", variant="quiet", width=theme.KEY_H)
+        remove.setAccessibleName("Remove mapping")
+        remove.setToolTip("Remove this mapping")
         remove.clicked.connect(lambda _=False, w=spin: self._remove_row(w))
 
         actions = QWidget(self)
         a_layout = QHBoxLayout(actions)
-        a_layout.setContentsMargins(0, 0, 0, 0)
+        a_layout.setContentsMargins(_PAD, _PAD, _PAD, _PAD)
+        a_layout.setSpacing(6)
         a_layout.addWidget(browse)
         a_layout.addWidget(test)
         a_layout.addWidget(remove)
 
-        self.table.setCellWidget(row, _COL_NOTE, spin)
-        self.table.setCellWidget(row, _COL_NAME, name_edit)
-        self.table.setCellWidget(row, _COL_PATH, path_edit)
+        self.table.setCellWidget(row, _COL_NOTE, _padded(spin))
+        self.table.setCellWidget(row, _COL_NAME, _padded(name_edit))
+        self.table.setCellWidget(row, _COL_PATH, _padded(path_edit))
         self.table.setCellWidget(row, _COL_ACTIONS, actions)
+        self.table.horizontalHeader().resizeSection(
+            _COL_ACTIONS, actions.sizeHint().width()
+        )
+        self._fields[spin] = (spin, path_edit)
+
+    def _row_fields(self, row: int):
+        wrapper = self.table.cellWidget(row, _COL_NOTE)
+        spin = wrapper.findChild(QSpinBox) if wrapper is not None else None
+        return self._fields.get(spin, (None, None))
 
     def _remove_row(self, marker_widget: QWidget) -> None:
         for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, _COL_NOTE) is marker_widget:
+            spin, _path = self._row_fields(row)
+            if spin is marker_widget:
+                self._fields.pop(spin, None)
                 self.table.removeRow(row)
                 return
 
@@ -160,3 +214,12 @@ class MappingEditor(QWidget):
         except ValueError:
             # Different drive on Windows -> keep absolute.
             return selected
+
+
+def _padded(field: QWidget) -> QWidget:
+    """Hold a cell editor with breathing room so the row line shows around it."""
+    w = QWidget()
+    lay = QHBoxLayout(w)
+    lay.setContentsMargins(_PAD, _PAD, _PAD, _PAD)
+    lay.addWidget(field)
+    return w

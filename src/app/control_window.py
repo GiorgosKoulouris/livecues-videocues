@@ -1,4 +1,4 @@
-"""Main control GUI: a Status view and an Edit view in a stacked widget."""
+"""Main control GUI: a Run tab and an Edit tab under the suite's top bar."""
 from __future__ import annotations
 
 import os
@@ -6,43 +6,55 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QMainWindow,
-    QPushButton,
+    QMessageBox,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from . import APP_NAME, __version__
+from . import theme
 from .config import ALL_CHANNELS, Config
 from .mapping_editor import MappingEditor
 from .midi_engine import MidiEngine, note_name
+from .theme import Key, StateChip, Tab, Tick
 
 _MAX_LOG_LINES = 500
 
-# Shared metrics for the output-placement controls, so every button/gap matches.
-_BTN_H = 28    # common control height (arrows, zoom, crop, spinbox, reset)
-_SQ = 40       # square button width (arrows, crop +/-)
-_WIDE = 76     # text button width (zoom in/out)
-_GAP = 6       # spacing between rows / grid cells
+# Shared metrics for the output-placement controls, so every key/gap matches.
+_SQ = 40       # square key width (stepper keys)
+_VAL_W = 76    # the recessed readout between a stepper's keys
+_TOGGLE_W = 108  # Reset view / Crop Edit-Done keys share a width and right edge
+_GAP = 6       # spacing between keys in a cluster
+_PAGE = 16     # page side margin
+_SECTION = 18  # space between sections
+_OUT_H = 46    # the Output slot: the one thing that must read across a dark room
+
+# now_playing_changed text prefix -> (shape, LED colour, state word, name colour)
+_NOW_STATES = (
+    ("Playing:", ("triangle", theme.LED_GREEN, "Playing", theme.SIGNAL)),
+    ("Idle:", ("square", theme.LED_RED, "Idle on output", theme.LEGEND_DIM)),
+    ("Idle (black)", ("square", theme.LED_RED, "Idle on output", theme.LEGEND_DIM)),
+    ("Missing file:", ("ring", theme.WARN_AMBER, "Missing file", theme.WARN_AMBER)),
+    ("Output window closed", ("ring", theme.WARN_AMBER, "Output closed", theme.LEGEND_DIM)),
+)
 
 
 class ControlWindow(QMainWindow):
-    """Status + Edit UI. Emits :pyattr:`config_changed` when the user saves."""
+    """Run + Edit UI. Emits :pyattr:`config_changed` when the user saves."""
 
     config_changed = Signal(object)       # Config
     test_note_requested = Signal(int)     # play this note's mapped clip
@@ -62,275 +74,438 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self._config = config.copy()
         self._engine = engine
+        self._edit_snapshot: Optional[tuple] = None
 
         self.setWindowTitle(f"{APP_NAME} {__version__}")
-        self.resize(720, 560)
+        self.resize(760, 800)
 
-        self._stack = QStackedWidget(self)
+        root = QWidget(self)
+        col = QVBoxLayout(root)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        col.addWidget(self._build_bar(root))
+        col.addWidget(self._build_tabs(root))
+
+        self._stack = QStackedWidget(root)
         self._status_page = self._build_status_page()
         self._edit_page = self._build_edit_page()
         self._stack.addWidget(self._status_page)
         self._stack.addWidget(self._edit_page)
-        self.setCentralWidget(self._stack)
+        col.addWidget(self._stack, stretch=1)
+        self.setCentralWidget(root)
 
+        self._select_tab(self._status_page)
+        self.set_midi_status(False, "Connecting…")
+        self.set_now_playing("")
         self.refresh_status_labels()
+        self._refresh_view_readouts()
 
-    # ================= Status page =====================================
+    # ================= Bar and tabs ====================================
+    def _build_bar(self, parent: QWidget) -> QWidget:
+        """Suite name at the left (LiveCues in Legend, VideoCues in Signal), MIDI state at the right."""
+        bar = QFrame(parent)
+        bar.setObjectName("bar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(_PAGE, 0, _PAGE, 0)
+        row.setSpacing(12)
+        bar.setFixedHeight(52)
+
+        title = QLabel(
+            f'LiveCues <span style="color:{theme.SIGNAL}">VideoCues</span>', bar
+        )
+        title.setFont(theme.ui_font(18, QFont.DemiBold))
+        title.setTextFormat(Qt.RichText)
+        row.addWidget(title)
+        row.addStretch(1)
+
+        self._midi_detail = QLabel("", bar)
+        self._midi_detail.setFont(theme.mono_font(12))
+        self._midi_detail.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        row.addWidget(self._midi_detail, stretch=0)
+        self._midi_chip = StateChip(bar)
+        row.addWidget(self._midi_chip)
+        return bar
+
+    def _build_tabs(self, parent: QWidget) -> QWidget:
+        strip = QWidget(parent)
+        strip.setAttribute(Qt.WA_StyledBackground, True)
+        strip.setStyleSheet(f"background: {theme.CHASSIS}; border-bottom: 1px solid {theme.LINE};")
+        row = QHBoxLayout(strip)
+        row.setContentsMargins(_PAGE, 0, _PAGE, 0)
+        row.setSpacing(0)
+        self._tab_run = Tab("Run", strip)
+        self._tab_edit = Tab("Edit", strip)
+        self._tab_run.clicked.connect(self._request_run)
+        self._tab_edit.clicked.connect(self.enter_edit_mode)
+        row.addWidget(self._tab_run)
+        row.addWidget(self._tab_edit)
+        return strip
+
+    def _select_tab(self, page: QWidget) -> None:
+        self._stack.setCurrentWidget(page)
+        self._tab_run.set_selected(page is self._status_page)
+        self._tab_edit.set_selected(page is self._edit_page)
+
+    # ================= Run page ========================================
     def _build_status_page(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(_PAGE, _PAGE, _PAGE, _PAGE)
+        layout.setSpacing(8)
 
-        status_box = QGroupBox("Status", page)
-        form = QFormLayout(status_box)
-        self._lbl_midi = QLabel("—")
-        self._lbl_device = QLabel("—")
-        self._lbl_channel = QLabel("—")
-        self._lbl_screen = QLabel("—")
-        self._lbl_playing = QLabel("—")
-        form.addRow("MIDI:", self._lbl_midi)
-        form.addRow("Device:", self._lbl_device)
-        form.addRow("Channel:", self._lbl_channel)
-        form.addRow("Output display:", self._lbl_screen)
-        form.addRow("Now playing:", self._lbl_playing)
-        layout.addWidget(status_box)
+        # Output: what is on the projector, beside the key that clears it.
+        layout.addWidget(theme.legend("Output", page))
+        out_row = QHBoxLayout()
+        out_row.setSpacing(8)
+        slot = QFrame(page)
+        slot.setObjectName("slot")
+        slot.setFixedHeight(_OUT_H)
+        slot_row = QHBoxLayout(slot)
+        slot_row.setContentsMargins(12, 0, 12, 0)
+        slot_row.setSpacing(12)
+        self._now_chip = StateChip(slot)
+        self._now_name = QLabel("", slot)
+        self._now_name.setFont(theme.mono_font(16, QFont.Medium))
+        self._now_chip.align_baseline_to(self._now_name.font())
+        self._now_name.setMinimumWidth(40)
+        self._now_name.setStyleSheet("background: transparent; border: 0;")
+        slot_row.addWidget(self._now_chip)
+        slot_row.addWidget(self._now_name, stretch=1)
+        out_row.addWidget(slot, stretch=1)
+        # Kept on self so it can sink red while the idle loop owns the output.
+        self._idle_btn = Key("Return to Idle", page, hint="Ctrl+B")
+        self._idle_btn.clicked.connect(self.return_to_idle_requested)
+        out_row.addWidget(self._idle_btn, 0, Qt.AlignVCenter)
+        layout.addLayout(out_row)
 
+        # Where the cues come from and go to.
+        info = QGridLayout()
+        info.setHorizontalSpacing(8)
+        info.setVerticalSpacing(6)
+        # Set on Edit, so plain values on the panel, not sunk slots: only the
+        # Output slot is recessed on Run.
+        self._lbl_device = self._plain_value(page)
+        self._lbl_channel = self._plain_value(page)
+        self._lbl_screen = self._plain_value(page)
+        for c, (caption, lbl) in enumerate((
+            ("MIDI device", self._lbl_device),
+            ("Channel", self._lbl_channel),
+            ("Output display", self._lbl_screen),
+        )):
+            info.addWidget(theme.legend(caption, page), 0, c)
+            info.addWidget(lbl, 1, c)
+        info.setColumnStretch(0, 3)
+        info.setColumnStretch(1, 1)
+        info.setColumnStretch(2, 3)
+        layout.addSpacing(6)
+        layout.addLayout(info)
+
+        layout.addSpacing(_SECTION - 8)
+        layout.addWidget(theme.rule(page))
+        layout.addSpacing(_SECTION - 8)
         layout.addWidget(self._build_display_controls(page))
 
-        log_box = QGroupBox("MIDI activity", page)
-        log_layout = QVBoxLayout(log_box)
-        self._log = QListWidget(log_box)
-        log_layout.addWidget(self._log)
-        layout.addWidget(log_box, stretch=1)
+        layout.addWidget(theme.rule(page))
+        layout.addSpacing(_SECTION - 8)
+        layout.addWidget(theme.legend("MIDI activity", page))
+        self._log = QListWidget(page)
+        self._log.setObjectName("log")
+        self._log.setFont(theme.mono_font(12))
+        self._log.setFocusPolicy(Qt.NoFocus)
+        self._log.setMinimumHeight(96)
+        layout.addWidget(self._log, stretch=1)
 
+        layout.addSpacing(4)
         buttons = QHBoxLayout()
-        edit_btn = QPushButton("Edit Configuration", page)
-        edit_btn.clicked.connect(self.enter_edit_mode)
-        test_btn = QPushButton("Test Trigger (Ctrl+T)", page)
-        test_btn.clicked.connect(self._test_first_mapping)
-        # Kept on self so its colour can track the output state (red = idle).
-        self._idle_btn = QPushButton("Return to Idle (Ctrl+B)", page)
-        self._idle_btn.clicked.connect(self.return_to_idle_requested)
-        show_btn = QPushButton("Show Output", page)
+        buttons.setSpacing(8)
+        show_btn = Key("Show Output", page)
         show_btn.setToolTip("Reopen the output window if it was closed, or bring it to the front")
         show_btn.clicked.connect(self.show_output_requested)
-        full_btn = QPushButton("Fullscreen (Ctrl+F)", page)
+        full_btn = Key("Fullscreen", page, hint="Ctrl+F")
         full_btn.clicked.connect(self.fullscreen_requested)
-        buttons.addWidget(edit_btn)
-        buttons.addWidget(test_btn)
-        buttons.addWidget(self._idle_btn)
+        buttons.addStretch(1)
         buttons.addWidget(show_btn)
         buttons.addWidget(full_btn)
-        buttons.addStretch(1)
         layout.addLayout(buttons)
         return page
 
-    def _build_display_controls(self, page: QWidget) -> QGroupBox:
-        """Move / zoom / crop the video on the output display (persists in config)."""
-        box = QGroupBox("Output position, zoom && crop", page)
+    @staticmethod
+    def _plain_value(parent: QWidget) -> QLabel:
+        """A read-only Mono value printed on the panel (no slot, so it can't look editable)."""
+        lbl = QLabel("—", parent)
+        lbl.setFont(theme.mono_font(13))
+        lbl.setStyleSheet(f"color: {theme.LEGEND};")
+        lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return lbl
+
+    @staticmethod
+    def _stepper(
+        parent: QWidget, less_glyph: str, more_glyph: str, name: str, on_less, on_more
+    ) -> tuple[QHBoxLayout, QLabel]:
+        """One axis: a key, a recessed Mono readout and a key, flush as a single unit."""
+        row = QHBoxLayout()
+        row.setSpacing(0)
+        row.setContentsMargins(0, 0, 0, 0)
+        less = Key("", parent, glyph=less_glyph, width=_SQ)
+        more = Key("", parent, glyph=more_glyph, width=_SQ)
+        for key, label, handler in ((less, f"{name} less", on_less), (more, f"{name} more", on_more)):
+            key.setAccessibleName(label)
+            key.setToolTip(label)
+            key.clicked.connect(handler)
+        value = theme.readout("", parent)
+        value.setAlignment(Qt.AlignCenter)
+        value.setFixedWidth(_VAL_W)
+        row.addWidget(less)
+        row.addWidget(value)
+        row.addWidget(more)
+        return row, value
+
+    def _refresh_view_readouts(self) -> None:
+        c = self._config
+        self._val_x.setText(f"{c.video_offset_x * 100:+.1f}%")
+        self._val_y.setText(f"{c.video_offset_y * 100:+.1f}%")
+        self._val_zoom.setText(f"{c.video_zoom * 100:.1f}%")
+        crops = {side: getattr(c, "video_crop_" + side) * 100 for side in self._val_crop}
+        for side, lbl in self._val_crop.items():
+            lbl.setText(f"{crops[side]:.1f}%")
+        # The closed Crop group still shows its values, in one line.
+        if any(round(v, 1) for v in crops.values()):
+            self._crop_summary.setText(
+                "   ".join(f"{k.capitalize()} {v:.1f}%" for k, v in crops.items())
+            )
+        else:
+            self._crop_summary.setText("None")
+
+    def _toggle_crop(self) -> None:
+        """Show / hide the four crop steppers (set-up work, closed during a show)."""
+        open_ = not self._crop_body.isVisible()
+        self._crop_body.setVisible(open_)
+        self._crop_summary.setVisible(not open_)
+        self._crop_toggle.setText("Done" if open_ else "Edit")
+        self._crop_toggle.setAccessibleName("Hide crop controls" if open_ else "Edit crop")
+
+    def _build_display_controls(self, page: QWidget) -> QWidget:
+        """Move / zoom / crop the video on the output display (persists in config).
+
+        Every axis is the same stepper; a hairline separates the three groups.
+        Each Step sits right beside the stepper it governs. Crop is set-up
+        work, so it stays closed (summary only) until asked for.
+        """
+        box = QWidget(page)
         outer = QVBoxLayout(box)
-        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(10)
 
-        # Three top-aligned clusters separated by full-height dividers, so their
-        # captions line up on a common baseline.
-        clusters = QHBoxLayout()
-        clusters.setSpacing(16)
-        clusters.addWidget(self._build_move_pad(box), 0, Qt.AlignTop)
-        clusters.addWidget(self._vline(box))
-        clusters.addWidget(self._build_zoom_pad(box), 0, Qt.AlignTop)
-        clusters.addWidget(self._vline(box))
-        clusters.addWidget(self._build_crop_pad(box), 0, Qt.AlignTop)
-        clusters.addStretch(1)
-        outer.addLayout(clusters)
-
-        # Reset on its own, separated from the adjustment controls.
-        line = QFrame(box)
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        outer.addWidget(line)
-        reset_row = QHBoxLayout()
-        reset = QPushButton("Reset view", box)
-        reset.setFixedHeight(_BTN_H)
+        head = QHBoxLayout()
+        head.addWidget(theme.legend("Output position, zoom & crop", box))
+        head.addStretch(1)
+        reset = Key("Reset view", box, variant="quiet", width=_TOGGLE_W)
+        reset.setToolTip("Back to full-frame: no move, zoom or crop")
         reset.clicked.connect(self.reset_view_requested)
-        reset_row.addStretch(1)
-        reset_row.addWidget(reset)
-        reset_row.addStretch(1)
-        outer.addLayout(reset_row)
+        head.addWidget(reset)
+        outer.addLayout(head)
+
+        def new_grid(parent_layout_cols: bool = True) -> QGridLayout:
+            # Columns: group | axis | stepper | axis | stepper | step.
+            g = QGridLayout()
+            g.setHorizontalSpacing(8)
+            g.setVerticalSpacing(_GAP)
+            g.setContentsMargins(0, 0, 0, 0)
+            # Pinned in both grids so the open Crop rows line up with those above.
+            g.setColumnMinimumWidth(0, 56)
+            g.setColumnMinimumWidth(1, 62)
+            g.setColumnMinimumWidth(2, 2 * _SQ + _VAL_W)
+            g.setColumnMinimumWidth(3, 62)
+            g.setColumnMinimumWidth(4, 2 * _SQ + _VAL_W)
+            g.setColumnStretch(6, 1)
+            return g
+
+        def group(g: QGridLayout, row: int, title: str) -> None:
+            lbl = theme.legend(title, box, theme.LEGEND)
+            lbl.setFont(theme.legend_font(12))
+            g.addWidget(lbl, row, 0, Qt.AlignVCenter)
+
+        def axis(g: QGridLayout, row: int, col: int, title: str) -> None:
+            lbl = theme.legend(title, box)
+            lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            g.addWidget(lbl, row, col)
+
+        def step_at(g, row, which, value, lo, hi, handler, tip):
+            spin, srow = self._step_control(box, value, lo, hi, handler)
+            spin.setToolTip(tip)
+            holder = QHBoxLayout()
+            holder.setContentsMargins(0, 0, 0, 0)
+            holder.addSpacing(14)
+            holder.addLayout(srow)
+            g.addLayout(holder, row, 5)
+            setattr(self, which, spin)
+
+        grid = new_grid()
+        pan = self.pan_requested.emit
+        group(grid, 0, "Move")
+        axis(grid, 0, 1, "X")
+        row, self._val_x = self._stepper(
+            box, "left", "right", "Move X", lambda: pan(-1.0, 0.0), lambda: pan(1.0, 0.0)
+        )
+        grid.addLayout(row, 0, 2)
+        axis(grid, 0, 3, "Y")
+        row, self._val_y = self._stepper(
+            box, "up", "down", "Move Y", lambda: pan(0.0, -1.0), lambda: pan(0.0, 1.0)
+        )
+        grid.addLayout(row, 0, 4)
+        step_at(grid, 0, "_move_step", self._config.move_step * 100.0, 0.5, 50.0,
+                self._on_move_step_changed, "How far one click moves the picture")
+
+        grid.addWidget(theme.rule(box), 1, 0, 1, 7)
+
+        group(grid, 2, "Zoom")
+        axis(grid, 2, 1, "Scale")
+        row, self._val_zoom = self._stepper(
+            box, "minus", "plus", "Zoom",
+            self.zoom_out_requested.emit, self.zoom_in_requested.emit,
+        )
+        grid.addLayout(row, 2, 2)
+        step_at(grid, 2, "_zoom_step", self._config.zoom_step * 100.0, 1.0, 100.0,
+                self._on_zoom_step_changed, "How much one click zooms")
+
+        # A little air under this rule so the Crop row centres between it and the
+        # section rule below.
+        grid.addWidget(theme.rule(box), 3, 0, 1, 7, Qt.AlignTop)
+        grid.setRowMinimumHeight(3, 3)
+
+        # Crop: a header line (summary + toggle), then the steppers when open.
+        group(grid, 4, "Crop")
+        self._crop_summary = QLabel("", box)
+        self._crop_summary.setFont(theme.mono_font(13))
+        self._crop_summary.setStyleSheet(f"color: {theme.LEGEND};")
+        grid.addWidget(self._crop_summary, 4, 1, 1, 5, Qt.AlignVCenter)
+        self._crop_toggle = Key("Edit", box, variant="quiet", width=_TOGGLE_W)
+        self._crop_toggle.setAccessibleName("Edit crop")
+        self._crop_toggle.setToolTip("Show or hide the four crop edges")
+        self._crop_toggle.clicked.connect(self._toggle_crop)
+        grid.addWidget(self._crop_toggle, 4, 5, 1, 2, Qt.AlignRight)  # flush with Reset view
+        for r in (0, 2, 4):
+            grid.setRowMinimumHeight(r, theme.KEY_H + 6)
+        outer.addLayout(grid)
+
+        self._crop_body = QWidget(box)
+        body = new_grid()
+        self._val_crop: dict[str, QLabel] = {}
+        # The empty group column keeps its width but loses its 8px spacing; give it back
+        # so these steppers sit exactly under Move's and Zoom's.
+        body.setContentsMargins(8, 0, 0, 0)
+        for r, c, side, label in (
+            (0, 1, "top", "Top"), (0, 3, "bottom", "Bottom"),
+            (1, 1, "left", "Left"), (1, 3, "right", "Right"),
+        ):
+            axis(body, r, c, label)
+            row, value = self._stepper(
+                self._crop_body, "minus", "plus", f"Crop {label.lower()}",
+                lambda _=False, s=side: self.crop_requested.emit(s, -1),
+                lambda _=False, s=side: self.crop_requested.emit(s, 1),
+            )
+            self._val_crop[side] = value
+            body.addLayout(row, r, c + 1)
+        self._crop_body.setLayout(body)
+        self._crop_body.setVisible(False)
+        outer.addWidget(self._crop_body)
         return box
 
-    def _cluster(self, parent: QWidget, title: str) -> tuple[QWidget, QVBoxLayout]:
-        """A captioned column with consistent margins/spacing for one control group."""
-        w = QWidget(parent)
-        col = QVBoxLayout(w)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(_GAP)
-        col.addWidget(self._caption(title, w))
-        return w, col
-
-    def _build_move_pad(self, parent: QWidget) -> QWidget:
-        """Symmetric directional pad + configurable step, for panning the video."""
-        w, col = self._cluster(parent, "Move")
-
-        pad = QGridLayout()
-        pad.setSpacing(_GAP)
-        for c in range(3):
-            pad.setColumnStretch(c, 1)  # equal columns keep the cross centred
-        up, down = self._btn("↑", _SQ, w), self._btn("↓", _SQ, w)
-        left, right = self._btn("←", _SQ, w), self._btn("→", _SQ, w)
-        pad.addWidget(up, 0, 1, Qt.AlignCenter)
-        pad.addWidget(left, 1, 0, Qt.AlignCenter)
-        pad.addWidget(right, 1, 2, Qt.AlignCenter)
-        pad.addWidget(down, 2, 1, Qt.AlignCenter)
-        up.clicked.connect(lambda: self.pan_requested.emit(0.0, -1.0))
-        down.clicked.connect(lambda: self.pan_requested.emit(0.0, 1.0))
-        left.clicked.connect(lambda: self.pan_requested.emit(-1.0, 0.0))
-        right.clicked.connect(lambda: self.pan_requested.emit(1.0, 0.0))
-        col.addLayout(pad)
-
-        # Configurable step size (percent of the output, per click), centred
-        # under the pad.
-        self._move_step, step_row = self._step_control(
-            w, self._config.move_step * 100.0, 0.5, 50.0, self._on_move_step_changed
-        )
-        col.addLayout(step_row)
-        return w
-
-    def _build_zoom_pad(self, parent: QWidget) -> QWidget:
-        w, col = self._cluster(parent, "Zoom")
-        zoom_in = self._btn("+  In", _WIDE, w)
-        zoom_out = self._btn("−  Out", _WIDE, w)
-        zoom_in.clicked.connect(self.zoom_in_requested)
-        zoom_out.clicked.connect(self.zoom_out_requested)
-        col.addWidget(zoom_in)
-        col.addWidget(zoom_out)
-        # Configurable per-click zoom increment (percent), centred under the buttons.
-        self._zoom_step, step_row = self._step_control(
-            w, self._config.zoom_step * 100.0, 1.0, 100.0, self._on_zoom_step_changed
-        )
-        col.addLayout(step_row)
-        col.addStretch(1)
-        return w
-
     def _step_control(self, parent, value_pct, minimum, maximum, on_changed):
-        """A centred 'Step  [n %]' row driving a percentage spinbox."""
+        """A 'STEP [n %]' row driving a percentage spinbox."""
         box = QDoubleSpinBox(parent)
         box.setRange(minimum, maximum)
         box.setSingleStep(0.5)
         box.setDecimals(1)
         box.setSuffix(" %")
-        box.setFixedHeight(_BTN_H)
+        box.setFont(theme.mono_font(13))
+        box.setFixedHeight(theme.KEY_H)
+        box.setFixedWidth(_VAL_W + 12)
+        box.setAlignment(Qt.AlignCenter)
         box.setValue(value_pct)
         box.valueChanged.connect(on_changed)
         row = QHBoxLayout()
-        row.setSpacing(_GAP)
-        row.addStretch(1)
-        row.addWidget(QLabel("Step", parent))
+        row.setSpacing(8)
+        row.addWidget(theme.legend("Step", parent))
         row.addWidget(box)
-        row.addStretch(1)
         return box, row
-
-    def _build_crop_pad(self, parent: QWidget) -> QWidget:
-        """A row per action (crop / uncrop), a column per edge."""
-        w, col = self._cluster(parent, "Crop edges")
-        grid = QGridLayout()
-        grid.setSpacing(_GAP)
-        sides = [("Top", "top"), ("Bottom", "bottom"), ("Left", "left"), ("Right", "right")]
-        for c, (label, _side) in enumerate(sides):
-            grid.addWidget(self._caption(label, w), 0, c + 1, Qt.AlignCenter)
-        grid.addWidget(QLabel("Crop", w), 1, 0, Qt.AlignRight | Qt.AlignVCenter)
-        grid.addWidget(QLabel("Uncrop", w), 2, 0, Qt.AlignRight | Qt.AlignVCenter)
-        for c, (_label, side) in enumerate(sides):
-            crop = self._btn("+", _SQ, w)
-            uncrop = self._btn("−", _SQ, w)
-            crop.clicked.connect(lambda _=False, s=side: self.crop_requested.emit(s, 1))
-            uncrop.clicked.connect(lambda _=False, s=side: self.crop_requested.emit(s, -1))
-            grid.addWidget(crop, 1, c + 1, Qt.AlignCenter)
-            grid.addWidget(uncrop, 2, c + 1, Qt.AlignCenter)
-        col.addLayout(grid)
-        col.addStretch(1)
-        return w
-
-    @staticmethod
-    def _btn(text: str, width: int, parent: QWidget) -> QPushButton:
-        b = QPushButton(text, parent)
-        b.setFixedSize(width, _BTN_H)
-        return b
-
-    @staticmethod
-    def _caption(text: str, parent: QWidget) -> QLabel:
-        # Bold, default text colour so it stays legible on light *and* dark
-        # themes (the previous palette(mid) was too low-contrast).
-        lbl = QLabel(text, parent)
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet("font-weight: 600;")
-        return lbl
-
-    @staticmethod
-    def _vline(parent: QWidget) -> QFrame:
-        line = QFrame(parent)
-        line.setFrameShape(QFrame.VLine)
-        line.setFrameShadow(QFrame.Sunken)
-        return line
 
     # ================= Edit page =======================================
     def _build_edit_page(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(_PAGE, _PAGE, _PAGE, _PAGE)
+        layout.setSpacing(6)
 
-        settings_box = QGroupBox("Settings", page)
-        form = QFormLayout(settings_box)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(2, 1)
+
+        def field(caption: str, widget: QWidget, row: int, col: int, extra: Optional[QWidget] = None, span: int = 1):
+            grid.addWidget(theme.legend(caption, page), row, col, 1, span)
+            if extra is None:
+                grid.addWidget(widget, row + 1, col, 1, span)
+            else:
+                grid.addWidget(_wrap_row(widget, extra), row + 1, col, 1, span)
 
         self._edit_video_root = QLineEdit(page)
-        root_row = QHBoxLayout()
-        root_browse = QPushButton("Browse…", page)
+        self._edit_video_root.setFont(theme.mono_font(13))
+        self._edit_video_root.setPlaceholderText("Folder that holds the clips")
+        root_browse = Key("Browse…", page)
         root_browse.clicked.connect(self._browse_video_root)
-        root_row.addWidget(self._edit_video_root)
-        root_row.addWidget(root_browse)
-        form.addRow("Video root folder:", _wrap(root_row))
+        field("Video root folder", self._edit_video_root, 0, 0, root_browse, span=3)
 
         self._edit_idle = QLineEdit(page)
-        idle_row = QHBoxLayout()
-        idle_browse = QPushButton("Browse…", page)
+        self._edit_idle.setFont(theme.mono_font(13))
+        self._edit_idle.setPlaceholderText("None: the output shows black between cues")
+        idle_browse = Key("Browse…", page)
         idle_browse.clicked.connect(self._browse_idle)
-        idle_row.addWidget(self._edit_idle)
-        idle_row.addWidget(idle_browse)
-        form.addRow("Idle (loop) video:", _wrap(idle_row))
+        field("Idle (loop) video", self._edit_idle, 2, 0, idle_browse, span=3)
+
+        grid.setRowMinimumHeight(4, 10)
 
         self._edit_device = QComboBox(page)
-        dev_row = QHBoxLayout()
-        dev_refresh = QPushButton("Refresh", page)
+        self._edit_device.setPlaceholderText("No MIDI devices found")
+        dev_refresh = Key("Refresh", page)
+        dev_refresh.setToolTip("Look for MIDI devices again")
         dev_refresh.clicked.connect(self._reload_devices)
-        dev_row.addWidget(self._edit_device, stretch=1)
-        dev_row.addWidget(dev_refresh)
-        form.addRow("MIDI device:", _wrap(dev_row))
+        field("MIDI device", self._edit_device, 5, 0, dev_refresh)
 
         self._edit_channel = QComboBox(page)
         self._edit_channel.addItem("All channels", ALL_CHANNELS)
         for ch in range(1, 17):
             self._edit_channel.addItem(f"Channel {ch}", ch)
-        form.addRow("MIDI channel:", self._edit_channel)
+        grid.setColumnMinimumWidth(1, 8)
+        field("MIDI channel", self._edit_channel, 5, 2)
 
         self._edit_screen = QComboBox(page)
-        form.addRow("Output display:", self._edit_screen)
+        field("Output display", self._edit_screen, 7, 0)
 
-        self._edit_muted = QCheckBox("Mute video audio", page)
-        form.addRow("Audio:", self._edit_muted)
+        self._edit_muted = Tick("Mute video audio", page)
+        field("Audio", self._edit_muted, 7, 2)
+        layout.addLayout(grid)
 
-        layout.addWidget(settings_box)
-
-        map_box = QGroupBox("Note → Video mappings", page)
-        map_layout = QVBoxLayout(map_box)
-        self._mapping_editor = MappingEditor(self._edit_video_root.text, map_box)
+        layout.addSpacing(_SECTION - 6)
+        layout.addWidget(theme.rule(page))
+        layout.addSpacing(_SECTION - 6)
+        layout.addWidget(theme.legend("Note → video mappings", page))
+        self._mapping_editor = MappingEditor(self._edit_video_root.text, page)
         self._mapping_editor.test_requested.connect(self.test_note_requested)
-        map_layout.addWidget(self._mapping_editor)
-        layout.addWidget(map_box, stretch=1)
+        layout.addWidget(self._mapping_editor, stretch=1)
 
+        layout.addSpacing(4)
         buttons = QHBoxLayout()
-        save_btn = QPushButton("Save", page)
-        save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel", page)
-        cancel_btn.clicked.connect(self._cancel)
+        buttons.setSpacing(8)
+        buttons.addWidget(self._mapping_editor.add_key)
         buttons.addStretch(1)
+        cancel_btn = Key("Cancel", page)
+        cancel_btn.setToolTip("Drop the changes and go back to Run")
+        cancel_btn.clicked.connect(self._cancel)
+        save_btn = Key("Save", page, variant="lit")
+        save_btn.clicked.connect(self._save)
         buttons.addWidget(cancel_btn)
         buttons.addWidget(save_btn)
         layout.addLayout(buttons)
@@ -340,6 +515,7 @@ class ControlWindow(QMainWindow):
     def set_config(self, config: Config) -> None:
         self._config = config.copy()
         self.refresh_status_labels()
+        self._refresh_view_readouts()
         # Keep the step spinboxes in sync without re-emitting their signals.
         for box, value in (
             (self._move_step, self._config.move_step),
@@ -358,8 +534,22 @@ class ControlWindow(QMainWindow):
         self.zoom_step_changed.emit(self._config.zoom_step)
 
     def set_midi_status(self, connected: bool, detail: str) -> None:
-        self._lbl_midi.setText(("● Connected — " if connected else "○ ") + detail)
-        self._lbl_midi.setStyleSheet("color: #2e7d32;" if connected else "color: #c62828;")
+        """Bar state: a green disc when MIDI is open, an amber ring (and why) when not."""
+        connecting = not connected and detail.startswith("Connecting")
+        if connected:
+            self._midi_chip.set_state("disc", theme.LED_GREEN, "MIDI connected", theme.LEGEND)
+        elif connecting:
+            self._midi_chip.set_state("ring", theme.LEGEND_DIM, "Connecting…", theme.LEGEND_DIM)
+        else:
+            self._midi_chip.set_state("ring", theme.WARN_AMBER, "MIDI offline", theme.WARN_AMBER)
+        self._midi_chip.setToolTip(detail)
+        # Connected: the device readout below already names the port. Offline:
+        # say why, beside the state.
+        shown = "" if connected or connecting else detail
+        fm = QFontMetrics(self._midi_detail.font())
+        self._midi_detail.setText(fm.elidedText(shown, Qt.ElideMiddle, 340))
+        self._midi_detail.setToolTip(shown)
+        self._midi_detail.setStyleSheet(f"color: {theme.LEGEND_DIM};")
 
     def append_activity(self, line: str) -> None:
         self._log.addItem(line)
@@ -368,33 +558,92 @@ class ControlWindow(QMainWindow):
         self._log.scrollToBottom()
 
     def set_now_playing(self, text: str) -> None:
-        self._lbl_playing.setText(text)
+        """Show what is on the output: a state shape and word, then the clip."""
+        shape, colour, word, name_colour = ("ring", theme.LEGEND_DIM, "Waiting", theme.LEGEND_DIM)
+        name = text
+        for prefix, state in _NOW_STATES:
+            if text.startswith(prefix):
+                shape, colour, word, name_colour = state
+                name = text[len(prefix):].strip()
+                break
+        if text == "Idle (black)":
+            name = "black (no idle video set)"
+        elif text == "Output window closed":
+            name = "Show Output reopens it"
+        self._now_chip.set_state(shape, colour, word, theme.LEGEND)
+        self._now_name.setStyleSheet(f"color: {name_colour}; background: transparent; border: 0;")
+        fm = QFontMetrics(self._now_name.font())
+        width = max(80, self._now_name.width())
+        self._now_name.setText(fm.elidedText(name, Qt.ElideMiddle, width))
+        self._now_name.setToolTip(name)
+        self._now_full = name
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        full = getattr(self, "_now_full", "")
+        if full:
+            fm = QFontMetrics(self._now_name.font())
+            self._now_name.setText(fm.elidedText(full, Qt.ElideMiddle, max(80, self._now_name.width())))
 
     def set_output_idle(self, idle: bool) -> None:
-        """Colour the Return to Idle button red while no clip is on the output.
+        """Sink the Return to Idle key in LED red while no clip is on the output.
 
         Follows the real output state, so a trigger that fails (missing file)
-        correctly leaves the button red.
+        correctly leaves the key red.
         """
-        self._idle_btn.setStyleSheet(
-            "background-color: #c62828; color: white; font-weight: 600;" if idle else ""
-        )
+        self._idle_btn.set_sunk(idle)
 
     def refresh_status_labels(self) -> None:
-        self._lbl_device.setText(self._config.midi_device or "—")
+        self._lbl_device.setText(self._config.midi_device or "None selected")
         ch = self._config.midi_channel
         self._lbl_channel.setText("All" if ch == ALL_CHANNELS else str(ch))
         self._lbl_screen.setText(self._describe_screen(self._config.output_screen))
+        for lbl in (self._lbl_device, self._lbl_screen):
+            lbl.setToolTip(lbl.text())
+        # Nothing will fire without a device: say so in the warning hue.
+        color = theme.LEGEND if self._config.midi_device else theme.WARN_AMBER
+        self._lbl_device.setStyleSheet(f"color: {color};")
 
     # ================= Mode switching ==================================
     def enter_edit_mode(self) -> None:
+        if self._stack.currentWidget() is self._edit_page:
+            return
         self._populate_edit_fields()
-        self._stack.setCurrentWidget(self._edit_page)
+        self._select_tab(self._edit_page)
+
+    def _request_run(self) -> None:
+        """Run tab: leave Edit, asking first when the form has unsaved changes."""
+        if self._stack.currentWidget() is not self._edit_page:
+            return
+        if self._form_snapshot() == self._edit_snapshot:
+            self._select_tab(self._status_page)
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved changes")
+        box.setText("Save your configuration changes?")
+        box.setInformativeText("Discard drops them and goes back to Run.")
+        save = Key("Save", box, variant="lit")
+        discard = Key("Discard", box)
+        keep = Key("Keep editing", box)
+        box.addButton(save, QMessageBox.AcceptRole)
+        box.addButton(discard, QMessageBox.DestructiveRole)
+        box.addButton(keep, QMessageBox.RejectRole)
+        box.setDefaultButton(None)
+        box.setEscapeButton(keep)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is save:
+            self._save()
+        elif clicked is discard:
+            self._cancel()
+        else:
+            self._tab_edit.set_selected(True)
+            self._tab_run.set_selected(False)
 
     def _cancel(self) -> None:
-        self._stack.setCurrentWidget(self._status_page)
+        self._select_tab(self._status_page)
 
-    def _save(self) -> None:
+    def _form_config(self) -> Config:
         # Start from the live config and overwrite only what this form owns, so
         # settings the Edit view doesn't show (view transform, window placement)
         # survive a save.
@@ -406,9 +655,20 @@ class ControlWindow(QMainWindow):
         new_config.output_screen = self._edit_screen.currentData() or 0
         new_config.audio_muted = self._edit_muted.isChecked()
         new_config.mappings = self._mapping_editor.to_mappings()
+        return new_config
+
+    def _form_snapshot(self) -> tuple:
+        c = self._form_config()
+        return (
+            c.video_root, c.idle_video, c.midi_device, c.midi_channel,
+            c.output_screen, c.audio_muted, tuple(sorted(c.mappings.items())),
+        )
+
+    def _save(self) -> None:
+        new_config = self._form_config()
         self._config = new_config
         self.refresh_status_labels()
-        self._stack.setCurrentWidget(self._status_page)
+        self._select_tab(self._status_page)
         self.config_changed.emit(new_config.copy())
 
     # ================= Edit field population ===========================
@@ -422,9 +682,10 @@ class ControlWindow(QMainWindow):
         self._reload_screens(select=cfg.output_screen)
         self._edit_muted.setChecked(cfg.audio_muted)
         self._mapping_editor.load(cfg.mappings)
+        self._edit_snapshot = self._form_snapshot()
 
     def _reload_devices(self, select: Optional[str] = None) -> None:
-        if select is None:
+        if not select:
             select = self._edit_device.currentText()
         self._edit_device.clear()
         devices = self._engine.available_devices()
@@ -495,8 +756,12 @@ class ControlWindow(QMainWindow):
         return f"Display {index + 1} (not connected)"
 
 
-def _wrap(layout) -> QWidget:
+def _wrap_row(main: QWidget, extra: QWidget) -> QWidget:
+    """A field with a key on its right, as one grid cell."""
     w = QWidget()
-    layout.setContentsMargins(0, 0, 0, 0)
-    w.setLayout(layout)
+    row = QHBoxLayout(w)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(8)
+    row.addWidget(main, stretch=1)
+    row.addWidget(extra)
     return w

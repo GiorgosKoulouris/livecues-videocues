@@ -77,12 +77,13 @@ app/
   paths.py           %APPDATA% + bundled-asset resolution (PyInstaller _MEIPASS aware)
   midi_engine.py     MidiEngine(QObject): MIDI port -> Qt signals; note_name()/parse_note_name() helpers
   video_window.py    VideoWindow: output window (Ctrl+F toggles fullscreen, resizable); fill-by-default video with manual zoom/pan/per-side crop; idle loop / trigger / return-to-idle; remembers its own placement
-  control_window.py  ControlWindow: Status view + Edit view (QStackedWidget)
+  control_window.py  ControlWindow: top bar + Run / Edit tabs over a QStackedWidget
   mapping_editor.py  MappingEditor: note -> video table widget (note # spinbox + synced note-name field)
+  theme.py           Suite look: colour tokens, Plex fonts, palette + style sheet, drawn Key / Tab / StateChip / Tick
 run.py               entry script (also the PyInstaller entry point)
 app.spec             PyInstaller build spec (run on Windows)
 requirements.txt     PySide6, mido, python-rtmidi
-assets/              app icon (app.svg/png/ico) + optional idle video; `*.mp4` here is
+assets/              app icon (app.svg/png/ico), fonts/ (IBM Plex TTFs + OFL), ui/ (spinbox/combo arrows), optional idle video; `*.mp4` here is
                      gitignored, so any clips are local fixtures (app.spec still bundles
                      whatever is in the folder at build time)
 ```
@@ -119,7 +120,7 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
   `VideoWindow.return_to_idle()` is a no-op while the idle loop is already
   playing, so a double press doesn't restart it from the top.
 - **Output state feedback**: `VideoWindow.idle_state_changed(bool)` →
-  `ControlWindow.set_output_idle` colours the Return to Idle button red. It
+  `ControlWindow.set_output_idle` sinks the Return to Idle key in LED red. It
   tracks the *actual* output (emitted from `play_idle`/`trigger`), so a trigger
   that fails on a missing file correctly leaves the button red.
 - **Window placement** persists as `output_screen` + `window_{x,y,width,height}`
@@ -139,13 +140,13 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
   MIDI, and quits. (Qt only auto-quits when the *last* window closes, so without
   this the app keeps running headless behind a closed control window.) Closing the
   **output** window alone is recoverable instead: it stops playback, reports idle,
-  and `VideoWindow.show_output()` (Status-page **Show Output** button) reopens it
+  and `VideoWindow.show_output()` (Run-tab **Show Output** key) reopens it
   at its saved placement and restarts the idle loop. `trigger()` reopens a closed
   output on its own so a cue can never land on a window that isn't there.
 - **Editing config must not drop unlisted fields**: `ControlWindow._save`
   starts from `self._config.copy()` and overwrites only the form's own fields.
   Rebuilding a fresh `Config(...)` there would silently reset the view transform
-  and window placement, which the Edit view doesn't show.
+  and window placement, which the Edit tab doesn't show.
 - **Output placement**: the output window opens at its remembered size/position
   (Ctrl+F / Fullscreen button toggles fullscreen). The video **fills** the output by default — the
   `QVideoWidget` uses `KeepAspectRatioByExpanding` (cover, no black bars) and is
@@ -153,10 +154,10 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
   panned, and **per-side cropped**, clipped to the window. A crop extends the
   video past that window edge (so the window clips it) while the opposite edge
   still reaches the window — cropping never introduces black gaps. Move / zoom /
-  crop controls live on the control window's Status page; values persist as
+  crop controls live on the control window's Run tab; values persist as
   `video_zoom`/`video_offset_x`/`video_offset_y`/`video_crop_{left,right,top,bottom}`
   (offsets and crops are fractions of window size). The per-click Move and Zoom
-  increments are user-configurable (Status-page **Step** spinboxes, defaults 2%
+  increments are user-configurable (Run-tab **Step** spinboxes, defaults 2%
   and ±10%) and persist as `move_step`/`zoom_step`; they reach the video via
   `VideoWindow.set_move_step`/`set_zoom_step` (separate from the transform — not
   part of `view_dict`). `VideoWindow._update` is the single clamped setter;
@@ -165,6 +166,25 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
   `reset_view_requested`) → `VideoWindow` methods → `view_changed` →
   `App._on_view_changed` (saves + syncs control's config copy). Saved transforms
   are re-applied via `VideoWindow.apply_view(config.view_dict())`.
+
+## Look (LiveCues suite design)
+
+The control window follows the suite design system of `livecues-reaper-remote`
+("The Silkscreen Desk"); `/workspace/DESIGN.md` records how it maps onto Qt.
+Everything visual lives in `app/theme.py`:
+
+- **Colours are tokens** (`theme.CHASSIS`, `theme.SIGNAL`, …). Never hard-code a
+  hex in a widget; never add a new hue.
+- **Fonts are QFont objects, not style-sheet rules.** QSS can't do letter-spacing,
+  and a QSS `font` rule overrides `setFont`. Use `theme.ui_font` / `mono_font` /
+  `legend_font`; labels printed on the panel go through `theme.legend()`.
+- **Buttons are `theme.Key`**, not QPushButton (QSS can't chamfer). One
+  `variant="lit"` key per view at most (Save on Edit); `set_sunk(True)` is the red
+  "on" state (Return to Idle at idle); `hint=` prints a hotkey; `glyph=` draws a
+  symbol (no Unicode arrows or ✕ in key text). Focus rings show for keyboard focus
+  only.
+- State is a drawn shape plus a word (`theme.StateChip`), never colour alone.
+- The output (`VideoWindow`) stays plain black; the theme is for the control window.
 
 ## Locked product behavior (don't change without asking)
 

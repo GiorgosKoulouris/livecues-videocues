@@ -11,16 +11,18 @@ configured MIDI note arrives.
 
 <br clear="left" />
 
-- **Status view** — live MIDI connection, channel, output display, now-playing,
-  and a scrolling MIDI activity log.
-- **Edit view** — configure the note → video mappings, video root folder, idle
+- **Run tab** — live MIDI connection, what is on the output (now playing, beside
+  **Return to Idle**), device, channel and output display, the output placement
+  controls, and a scrolling MIDI activity log.
+- **Edit tab** — configure the note → video mappings, video root folder, idle
   (loop) video, MIDI device, MIDI channel, output display, and audio mute. Each
   mapping accepts the note as either a **MIDI number** (0–127) or a **note name**
-  (e.g. `C3`, `F#2`, `Bb4`) — the two fields stay in sync.
+  (e.g. `C3`, `F#2`, `Bb4`) — the two fields stay in sync. **Save** applies the
+  changes; leaving for the Run tab with unsaved changes asks first.
 - **Output window** — opens as a resizable, movable window on the display of your
   choice (projector / second monitor); press **Ctrl+F** (or use the Fullscreen
   button) to toggle fullscreen. The video **fills** the output by default (no black bars).
-  Use the **Output position, zoom & crop** controls in the Status view to move,
+  Use the **Output position, zoom & crop** controls on the Run tab to move,
   zoom, and crop each edge of the video on the display (handy for projector
   alignment); the placement is saved. Plays a looping idle video when nothing is
   triggered; a note interrupts with its clip, plays once, then returns to idle.
@@ -32,6 +34,14 @@ configured MIDI note arrives.
 - Configuration is stored in `%APPDATA%\LiveCues\VideoCues\config.json` and
   **survives app and system restarts**.
 
+## Look
+
+The control window uses the LiveCues suite design shared with
+[LiveCues ReaperRemote](https://github.com/GiorgosKoulouris/livecues-reaper-remote):
+a flat, dark-only panel with small spaced-capital labels, one signal orange for
+the selected tab, keyboard focus and the one highlighted key, and green / red /
+amber only for state, always next to a shape or a word. See [DESIGN.md](DESIGN.md).
+
 ## How triggering behaves
 
 | Situation | Behaviour |
@@ -41,12 +51,13 @@ configured MIDI note arrives.
 | Nothing playing | Loops the configured idle video (or black if none set) |
 | **Return to Idle** pressed | Drops the current clip and resumes the idle loop at once |
 | Note arrives with the output window closed | Reopens the output where it was, then plays the clip |
-| Audio | Muted by default; toggle in Edit view |
+| Audio | Muted by default; toggle in the Edit tab |
 | Note-Off | Ignored (only Note-On triggers) |
 
 The **Return to Idle** button turns **red whenever the idle loop is on the
-output** — i.e. whenever no cue is playing — so a glance at the control window
-tells you nothing is currently on the projector. A MIDI note always takes over
+output** — i.e. whenever no cue is playing — and the output readout beside it
+says **Idle on output**, so a glance at the control window tells you nothing is
+currently on the projector. A MIDI note always takes over
 from the idle loop; there is no mode to exit first.
 
 ## Hotkeys
@@ -58,7 +69,7 @@ sees:
 |-----|--------|
 | **Ctrl+B** | Return to Idle (stop the current clip, resume the idle loop) |
 | **Ctrl+F** | Toggle fullscreen of the output window |
-| **Ctrl+T** | Test-trigger the first mapping (no MIDI needed) |
+| **Ctrl+T** | Test-trigger the first mapping (no MIDI needed; each mapping row also has a Test key) |
 | **Esc** | Exit fullscreen |
 
 ## RTP-MIDI setup (Windows)
@@ -116,7 +127,7 @@ Both are gitignored.
    In **PowerShell**, activate with `.\winvenv\Scripts\Activate.ps1` instead. If
    activation is blocked, run
    `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once and retry.
-3. The app launches with the control window. Use **Edit Configuration** to set
+3. The app launches with the control window. Use the **Edit** tab to set
    the MIDI device, channel, output display, video root, idle video, and the
    note → video mappings, then **Save**. See *RTP-MIDI setup* above for network
    MIDI.
@@ -261,7 +272,7 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
   (absolute paths are also accepted).
 - `output_screen`: index of the display used for the output window. Updated
   automatically when you drag the window onto another display, and settable from
-  the Edit view.
+  the Edit tab.
 - `window_x` / `window_y` / `window_width` / `window_height`: the output
   window's **windowed** rectangle, saved shortly after you stop moving or
   resizing it, and kept unchanged while fullscreen so leaving fullscreen returns
@@ -301,10 +312,12 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
     │   ├── midi_engine.py     MIDI input -> Qt signals
     │   ├── video_window.py    output window (fill, zoom/pan/crop, idle/trigger,
     │   │                      remembered size/position/display/fullscreen)
-    │   ├── control_window.py  Status + Edit GUI
-    │   └── mapping_editor.py  note -> video table
-    ├── assets/                app icon (app.svg/png/ico) + a place to drop an
-    │                          idle video (`*.mp4` here is gitignored)
+    │   ├── control_window.py  Run + Edit GUI
+    │   ├── mapping_editor.py  note -> video table
+    │   └── theme.py           LiveCues suite look: colours, fonts, drawn keys
+    ├── assets/                app icon (app.svg/png/ico), IBM Plex fonts,
+    │                          UI arrows, and a place to drop an idle video
+    │                          (`*.mp4` here is gitignored)
     ├── .venv/                 Linux venv used by the dev container (gitignored)
     ├── run.py                 entry script (also used by PyInstaller)
     ├── app.spec               PyInstaller build spec (run on Windows)

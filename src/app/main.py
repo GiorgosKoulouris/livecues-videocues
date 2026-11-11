@@ -12,6 +12,7 @@ from .config import Config
 from .paths import asset
 from .control_window import ControlWindow
 from .midi_engine import MidiEngine, note_name
+from .theme import apply_theme
 from .video_window import VideoWindow
 
 
@@ -153,6 +154,7 @@ def main() -> int:
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(APP_NAME)
     qapp.setWindowIcon(QIcon(str(asset("app.ico"))))
+    apply_theme(qapp)
 
     app = App(qapp)
     app.start()
