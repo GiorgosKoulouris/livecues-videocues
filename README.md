@@ -19,6 +19,7 @@ configured MIDI note arrives.
   mapping accepts the note as either a **MIDI number** (0–127) or a **note name**
   (e.g. `C3`, `F#2`, `Bb4`) — the two fields stay in sync. **Save** applies the
   changes; leaving for the Run tab with unsaved changes asks first.
+  The tab also shows the app version and **Check for updates** (see *Updates*).
 - **Output window** — opens as a resizable, movable window on the display of your
   choice (projector / second monitor); press **Ctrl+F** (or use the Fullscreen
   button) to toggle fullscreen. The video **fills** the output by default (no black bars).
@@ -33,6 +34,28 @@ configured MIDI note arrives.
   closing the **control** window quits the whole app, output included.
 - Configuration is stored in `%APPDATA%\LiveCues\VideoCues\config.json` and
   **survives app and system restarts**.
+
+## Download
+
+Grab `VideoCues-X.Y.Z-win64.exe` from the
+[latest release](https://github.com/GiorgosKoulouris/livecues-videocues/releases/latest).
+It is a single file with nothing to install: put it anywhere and run it.
+
+- **"Windows protected your PC"**: the exe isn't code-signed, so SmartScreen
+  warns on first run. Click **More info → Run anyway**.
+- **Check the download** (optional): each release lists the exe's SHA-256 in
+  `SHA256SUMS.txt`. In PowerShell, `Get-FileHash VideoCues-X.Y.Z-win64.exe`
+  should print the same hash.
+
+### Updates
+
+At launch the app asks GitHub (`api.github.com`) once whether a newer release
+exists. Nothing else is sent, and when offline it stays silent. If there is
+one, the Edit tab shows an **Update available** badge next to the version;
+it never interrupts the Run tab. **Check for updates** on the Edit tab checks
+on demand. Either one opens a short dialog with the release notes and a link
+to the download page. The app never downloads or installs anything itself:
+download the new exe and replace the old one. Pre-releases are never offered.
 
 ## Look
 
@@ -233,6 +256,29 @@ Qt's multimedia / FFmpeg backend so video playback works on machines without Qt
 installed, and the `assets` folder (default idle placeholder + icon). UPX is
 disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
 
+## Releasing
+
+Maintainers only. A release is built by GitHub Actions
+([`release.yml`](.github/workflows/release.yml)) when a `vX.Y.Z` tag on `main`
+is pushed:
+
+1. On `dev`, bump `__version__` in [`src/app/__init__.py`](src/app/__init__.py)
+   and commit.
+2. `/branch-flow promote`, then `/branch-flow ship`.
+3. Tag `main` and push it:
+
+   ```bash
+   git tag v1.2.0 main
+   git push origin main v1.2.0
+   ```
+
+The workflow refuses a tag that isn't on `main` or doesn't match
+`__version__`. It builds on Windows with Python 3.14 from the pinned
+requirements, then publishes the release with `VideoCues-X.Y.Z-win64.exe`,
+`SHA256SUMS.txt` and auto-generated notes (edit them on GitHub afterwards if
+needed). Running apps learn about it from `/releases/latest`, so a release
+marked as a pre-release is never offered to them.
+
 ## Configuration file
 
 `%APPDATA%\LiveCues\VideoCues\config.json`:
@@ -304,7 +350,7 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
 ├── .gitignore
 ├── .devcontainer/   VS Code dev container (Linux dev box)
 ├── .github/         contributing, security policy, issue/PR templates,
-│                    Dependabot config, CI (CodeQL + pip-audit)
+│                    Dependabot config, CI (CodeQL + pip-audit + release)
 ├── winvenv/         Windows venv — run + build here (gitignored)
 └── src/             the application
     ├── app/
@@ -316,6 +362,8 @@ disabled on purpose: it corrupts the Qt/FFmpeg DLLs inside a one-file build.
     │   │                      remembered size/position/display/fullscreen)
     │   ├── control_window.py  Run + Edit GUI
     │   ├── mapping_editor.py  note -> video table
+    │   ├── updates.py         GitHub latest-release check (notify only)
+    │   ├── update_dialog.py   the update dialog
     │   └── theme.py           LiveCues suite look: colours, fonts, drawn keys
     ├── assets/                app icon (app.svg/png/ico), IBM Plex fonts,
     │                          UI arrows, and a place to drop an idle video

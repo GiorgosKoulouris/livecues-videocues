@@ -79,6 +79,8 @@ app/
   video_window.py    VideoWindow: output window (Ctrl+F toggles fullscreen, resizable); fill-by-default video with manual zoom/pan/per-side crop; idle loop / trigger / return-to-idle; remembers its own placement
   control_window.py  ControlWindow: top bar + Run / Edit tabs over a QStackedWidget
   mapping_editor.py  MappingEditor: note -> video table widget (note # spinbox + synced note-name field)
+  updates.py         UpdateChecker(QObject): one GET to GitHub /releases/latest -> UpdateResult (notify only)
+  update_dialog.py   UpdateDialog: current -> latest, release notes, Open download page
   theme.py           Suite look: colour tokens, Plex fonts, palette + style sheet, drawn Key / Tab / StateChip / Tick
 run.py               entry script (also the PyInstaller entry point)
 app.spec             PyInstaller build spec (run on Windows)
@@ -168,6 +170,19 @@ the SVG, run `python assets/build_icon.py` (Qt-only, no Pillow) → it rewrites 
   `reset_view_requested`) → `VideoWindow` methods → `view_changed` →
   `App._on_view_changed` (saves + syncs control's config copy). Saved transforms
   are re-applied via `VideoWindow.apply_view(config.view_dict())`.
+- **Update check**: `App.start()` runs `UpdateChecker.check(manual=False)` once
+  via `QTimer.singleShot(0)`; the Edit tab's **Check for updates** runs a
+  manual check (`check_updates_requested`). Results go to
+  `ControlWindow.set_update_result`, which toggles the amber **Update
+  available** badge beside the version on the Edit tab and opens
+  `UpdateDialog` **only for manual checks**. The launch check must never pop a
+  dialog or touch the Run tab, and failures stay silent unless manual. It only
+  notifies and links to the release page; there is no self-update, by design.
+  Version comparison is strict `X.Y.Z` (`updates.parse_version`).
+- **Releases**: `.github/workflows/release.yml` builds on a pushed `vX.Y.Z` tag
+  that is on `main` and equals `__version__`, producing
+  `VideoCues-X.Y.Z-win64.exe` + `SHA256SUMS.txt`. Tagging and pushing are the
+  owner's job (see README, *Releasing*).
 
 ## Look (LiveCues suite design)
 

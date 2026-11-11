@@ -31,6 +31,8 @@ from .config import ALL_CHANNELS, Config
 from .mapping_editor import MappingEditor
 from .midi_engine import MidiEngine, note_name
 from .theme import Key, StateChip, Tab, Tick
+from .update_dialog import UpdateDialog
+from .updates import UpdateResult
 
 _MAX_LOG_LINES = 500
 
@@ -69,12 +71,14 @@ class ControlWindow(QMainWindow):
     move_step_changed = Signal(float)     # per-click pan increment (fraction of window)
     zoom_step_changed = Signal(float)     # per-click zoom increment (fraction)
     reset_view_requested = Signal()
+    check_updates_requested = Signal()    # user pressed Check for updates
 
     def __init__(self, config: Config, engine: MidiEngine) -> None:
         super().__init__()
         self._config = config.copy()
         self._engine = engine
         self._edit_snapshot: Optional[tuple] = None
+        self._update: Optional[UpdateResult] = None  # last "update available" result
 
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.resize(760, 800)
@@ -486,6 +490,9 @@ class ControlWindow(QMainWindow):
 
         self._edit_muted = Tick("Mute video audio", page)
         field("Audio", self._edit_muted, 7, 2)
+
+        grid.setRowMinimumHeight(9, 10)
+        field("Version", self._build_version_row(page), 10, 0, span=3)
         layout.addLayout(grid)
 
         layout.addSpacing(_SECTION - 6)
@@ -510,6 +517,50 @@ class ControlWindow(QMainWindow):
         buttons.addWidget(save_btn)
         layout.addLayout(buttons)
         return page
+
+    def _build_version_row(self, page: QWidget) -> QWidget:
+        """Running version, the quiet update badge, and Check for updates."""
+        row_w = QWidget(page)
+        row = QHBoxLayout(row_w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        version = QLabel(__version__, row_w)
+        version.setFont(theme.mono_font(13))
+        row.addWidget(version)
+        self._update_badge = _ClickableChip(row_w)
+        self._update_badge.set_state("ring", theme.WARN_AMBER, "Update available", theme.WARN_AMBER)
+        self._update_badge.setToolTip("Show what's new")
+        self._update_badge.clicked.connect(self._show_known_update)
+        self._update_badge.hide()
+        row.addWidget(self._update_badge)
+        row.addStretch(1)
+        self._check_updates_btn = Key("Check for updates", row_w)
+        self._check_updates_btn.setToolTip("Ask GitHub whether a newer release exists")
+        self._check_updates_btn.clicked.connect(self._request_update_check)
+        row.addWidget(self._check_updates_btn)
+        return row_w
+
+    def _request_update_check(self) -> None:
+        self._check_updates_btn.setEnabled(False)
+        self._check_updates_btn.setText("Checking…")
+        self.check_updates_requested.emit()
+
+    def set_update_result(self, result: UpdateResult) -> None:
+        """Badge follows every check; only a check the user asked for opens the dialog."""
+        if result.status == "update":
+            self._update = result
+        elif result.status == "current":
+            self._update = None
+        # An error keeps whatever an earlier check found.
+        self._update_badge.setVisible(self._update is not None)
+        if result.manual:
+            self._check_updates_btn.setEnabled(True)
+            self._check_updates_btn.setText("Check for updates")
+            UpdateDialog(result, self).exec()
+
+    def _show_known_update(self) -> None:
+        if self._update is not None:
+            UpdateDialog(self._update, self).exec()
 
     # ================= External updates ================================
     def set_config(self, config: Config) -> None:
@@ -765,3 +816,18 @@ def _wrap_row(main: QWidget, extra: QWidget) -> QWidget:
     row.addWidget(main, stretch=1)
     row.addWidget(extra)
     return w
+
+
+class _ClickableChip(StateChip):
+    """A state chip that also works as a link (the Update available badge)."""
+
+    clicked = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)

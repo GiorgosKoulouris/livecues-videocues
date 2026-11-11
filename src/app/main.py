@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication
 
@@ -13,6 +13,7 @@ from .paths import asset
 from .control_window import ControlWindow
 from .midi_engine import MidiEngine, note_name
 from .theme import apply_theme
+from .updates import UpdateChecker
 from .video_window import VideoWindow
 
 
@@ -26,6 +27,7 @@ class App:
         self.engine = MidiEngine()
         self.video = VideoWindow()
         self.control = ControlWindow(self.config, self.engine)
+        self.updates = UpdateChecker(qapp)
 
         self._connect_signals()
         self._install_hotkeys()
@@ -47,6 +49,8 @@ class App:
         self.control.show_output_requested.connect(self.video.show_output)
         self.control.fullscreen_requested.connect(self.video.toggle_fullscreen)
         self.control.closing.connect(self._on_control_closed)
+        self.control.check_updates_requested.connect(lambda: self.updates.check(manual=True))
+        self.updates.finished.connect(self.control.set_update_result)
 
         self.control.zoom_in_requested.connect(self.video.zoom_in)
         self.control.zoom_out_requested.connect(self.video.zoom_out)
@@ -139,6 +143,8 @@ class App:
         self.video.set_zoom_step(self.config.zoom_step)
         self.video.apply_view(self.config.view_dict())
         self.engine.connect_device(self.config.midi_device, self.config.midi_channel)
+        # Once per launch, after the window is up; silent unless something is newer.
+        QTimer.singleShot(0, lambda: self.updates.check(manual=False))
 
     def _on_control_closed(self) -> None:
         """The control window is the app: closing it takes the output down too."""
