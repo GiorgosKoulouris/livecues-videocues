@@ -1,6 +1,6 @@
 services:
   dev:
-    container_name: miditrigger-devcontainer
+    container_name: videocues-devcontainer
 
     build:
       context: ..
@@ -9,6 +9,7 @@ services:
     volumes:
       - ..:/workspace
       - claude:/home/vscode/.claude
+      - ${CLAUDE_SKILLS_DIR:-D:/Projects/Other/ClaudeSkills}:/home/vscode/.claude/skills
 
     tty: true
 

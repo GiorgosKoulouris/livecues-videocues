@@ -1,11 +1,14 @@
 {
-    "name": "MidiVideoTrigger Development",
+    "name": "VideoCues Development",
     "dockerComposeFile": "docker-compose.yml",
     "service": "dev",
     "workspaceFolder": "/workspace",
     "shutdownAction": "stopCompose",
     "remoteUser": "vscode",
     "updateRemoteUserUID": true,
+    "features": {
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
     "customizations": {
         "vscode": {
             "extensions": [

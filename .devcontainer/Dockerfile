@@ -11,11 +11,10 @@ USER root
 # and QtMultimedia reports "No QtMultimedia backends found", which kills
 # QMediaPlayer/QVideoSink entirely.
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
         curl \
         python3 \
         python3-venv \
-        python3-pip \
         libasound2-dev \
         pkg-config \
         libglib2.0-0 \
